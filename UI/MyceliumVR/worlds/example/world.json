@@ -1,0 +1,14 @@
+{
+  "format": "mycelium.world",
+  "version": 1,
+  "package": "example",
+  "name": "Example Mycelium World",
+  "entry": {
+    "script": "scripts/main.js"
+  },
+  "permissions": {
+    "storage": false,
+    "network": false,
+    "wasm": false
+  }
+}

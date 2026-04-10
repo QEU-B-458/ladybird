@@ -1,0 +1,65 @@
+; SPIR-V
+; Version: 1.6
+; Generator: Khronos SPIR-V Tools Assembler; 0
+; Bound: 36
+; Schema: 0
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %main "main" %gl_VertexIndex %_
+               OpSource GLSL 450
+               OpName %main "main"
+               OpName %gl_VertexIndex "gl_VertexIndex"
+               OpName %gl_PerVertex "gl_PerVertex"
+               OpMemberName %gl_PerVertex 0 "gl_Position"
+               OpName %_ ""
+               OpDecorate %gl_VertexIndex BuiltIn VertexIndex
+               OpMemberDecorate %gl_PerVertex 0 BuiltIn Position
+               OpDecorate %gl_PerVertex Block
+       %void = OpTypeVoid
+          %6 = OpTypeFunction %void
+       %bool = OpTypeBool
+        %int = OpTypeInt 32 1
+      %float = OpTypeFloat 32
+    %v4float = OpTypeVector %float 4
+%gl_PerVertex = OpTypeStruct %v4float
+%_ptr_Input_int = OpTypePointer Input %int
+%_ptr_Output_gl_PerVertex = OpTypePointer Output %gl_PerVertex
+%_ptr_Output_v4float = OpTypePointer Output %v4float
+%gl_VertexIndex = OpVariable %_ptr_Input_int Input
+          %_ = OpVariable %_ptr_Output_gl_PerVertex Output
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+ %float_n0_5 = OpConstant %float -0.5
+    %float_0 = OpConstant %float 0
+  %float_0_5 = OpConstant %float 0.5
+    %float_1 = OpConstant %float 1
+         %20 = OpConstantComposite %v4float %float_n0_5 %float_n0_5 %float_0 %float_1
+         %21 = OpConstantComposite %v4float %float_0_5 %float_n0_5 %float_0 %float_1
+         %22 = OpConstantComposite %v4float %float_0 %float_0_5 %float_0 %float_1
+       %main = OpFunction %void None %6
+         %23 = OpLabel
+         %24 = OpLoad %int %gl_VertexIndex
+         %25 = OpIEqual %bool %24 %int_0
+               OpSelectionMerge %26 None
+               OpBranchConditional %25 %27 %28
+         %27 = OpLabel
+         %29 = OpAccessChain %_ptr_Output_v4float %_ %int_0
+               OpStore %29 %20
+               OpBranch %26
+         %28 = OpLabel
+         %30 = OpIEqual %bool %24 %int_1
+               OpSelectionMerge %31 None
+               OpBranchConditional %30 %32 %33
+         %32 = OpLabel
+         %34 = OpAccessChain %_ptr_Output_v4float %_ %int_0
+               OpStore %34 %21
+               OpBranch %31
+         %33 = OpLabel
+         %35 = OpAccessChain %_ptr_Output_v4float %_ %int_0
+               OpStore %35 %22
+               OpBranch %31
+         %31 = OpLabel
+               OpBranch %26
+         %26 = OpLabel
+               OpReturn
+               OpFunctionEnd

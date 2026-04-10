@@ -1,0 +1,132 @@
+{
+  "apiName": "mycelium",
+  "sdkName": "Mycelium",
+  "functions": [
+    {
+      "module": "Debug",
+      "jsNamespace": "",
+      "name": "log",
+      "description": "Write a message to the native MyceliumVR log.",
+      "returnType": "void",
+      "hotPath": false,
+      "args": [{ "name": "message", "type": "string" }]
+    },
+    {
+      "module": "World",
+      "jsNamespace": "",
+      "name": "spawnEntity",
+      "description": "Create a native ECS entity and return its opaque handle.",
+      "returnType": "EntityId",
+      "hotPath": false,
+      "args": []
+    },
+    {
+      "module": "World",
+      "jsNamespace": "",
+      "name": "destroyEntity",
+      "description": "Destroy a native ECS entity. Returns false for stale or invalid handles.",
+      "returnType": "boolean",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }]
+    },
+    {
+      "module": "Debug",
+      "jsNamespace": "",
+      "name": "entityCount",
+      "description": "Return the number of live native ECS entities.",
+      "returnType": "number",
+      "hotPath": false,
+      "args": []
+    },
+    {
+      "module": "Debug",
+      "jsNamespace": "",
+      "name": "dirtyTransformCount",
+      "description": "Return the number of live entities with dirty transforms.",
+      "returnType": "number",
+      "hotPath": false,
+      "args": []
+    },
+    {
+      "module": "Transform",
+      "jsNamespace": "",
+      "name": "setTransform",
+      "description": "Write a transform directly into native ECS storage.",
+      "returnType": "boolean",
+      "hotPath": true,
+      "args": [{ "name": "entity", "type": "EntityId" }, { "name": "px", "type": "number" }, { "name": "py", "type": "number" }, { "name": "pz", "type": "number" }, { "name": "qx", "type": "number" }, { "name": "qy", "type": "number" }, { "name": "qz", "type": "number" }, { "name": "qw", "type": "number" }, { "name": "sx", "type": "number" }, { "name": "sy", "type": "number" }, { "name": "sz", "type": "number" }]
+    },
+    {
+      "module": "Transform",
+      "jsNamespace": "",
+      "name": "acquireTransformBuffer",
+      "description": "Acquire a Float32Array for bulk transform writes.",
+      "returnType": "Float32Array",
+      "hotPath": true,
+      "args": [{ "name": "capacity", "type": "number" }]
+    },
+    {
+      "module": "Transform",
+      "jsNamespace": "",
+      "name": "commitTransformBuffer",
+      "description": "Apply rows from the acquired transform buffer and return the accepted transform count.",
+      "returnType": "number",
+      "hotPath": true,
+      "args": [{ "name": "count", "type": "number" }]
+    },
+    {
+      "module": "Render",
+      "jsNamespace": "",
+      "name": "setMesh",
+      "description": "Assign a mesh asset handle to an entity.",
+      "returnType": "boolean",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }, { "name": "mesh", "type": "string" }]
+    },
+    {
+      "module": "Render",
+      "jsNamespace": "",
+      "name": "setMaterial",
+      "description": "Assign a material asset handle to an entity.",
+      "returnType": "boolean",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }, { "name": "material", "type": "string" }]
+    },
+    {
+      "module": "Panel",
+      "jsNamespace": "",
+      "name": "createPanel",
+      "description": "Attach a WebContent panel definition to an entity.",
+      "returnType": "boolean",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }, { "name": "url", "type": "string" }, { "name": "width", "type": "number" }, { "name": "height", "type": "number" }]
+    },
+    {
+      "module": "FileSystem",
+      "jsNamespace": "fs",
+      "name": "readText",
+      "description": "Read a UTF-8 text file from a mounted Mycelium virtual filesystem path.",
+      "returnType": "string",
+      "hotPath": false,
+      "args": [{ "name": "path", "type": "string" }]
+    },
+    {
+      "module": "FileSystem",
+      "jsNamespace": "fs",
+      "name": "exists",
+      "description": "Return true if a mounted Mycelium virtual filesystem path exists.",
+      "returnType": "boolean",
+      "hotPath": false,
+      "args": [{ "name": "path", "type": "string" }]
+    },
+    {
+      "module": "FileSystem",
+      "jsNamespace": "fs",
+      "name": "writeText",
+      "description": "Write UTF-8 text to a mounted writable Mycelium virtual filesystem path.",
+      "returnType": "boolean",
+      "hotPath": false,
+      "args": [{ "name": "path", "type": "string" }, { "name": "text", "type": "string" }]
+    }
+  ]
+}

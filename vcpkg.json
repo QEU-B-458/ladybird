@@ -167,7 +167,16 @@
     },
     {
       "name": "sdl3",
-      "default-features": false
+      "default-features": false,
+      "features": [
+        { "name": "wayland", "platform": "linux" },
+        { "name": "x11", "platform": "linux" },
+        { "name": "vulkan", "platform": "linux | windows" }
+      ]
+    },
+    {
+      "name": "shaderc",
+      "platform": "linux | windows"
     },
     "simdjson",
     "simdutf",
