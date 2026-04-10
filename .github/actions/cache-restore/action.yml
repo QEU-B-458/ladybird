@@ -42,15 +42,14 @@ runs:
     - name: 'Compiler Cache'
       uses: actions/cache/restore@v4
       id: 'ccache'
-      if: ${{ inputs.ccache_path != '' }}
       with:
         path: ${{ inputs.ccache_path }}
-        key: '"ccache" | "${{ inputs.os }}" | "${{ inputs.arch }}" | "${{ inputs.toolchain }}" | "${{ inputs.cache_key_extra }}" | ${{ steps.date-stamp.outputs.timestamp }}'
+        key: ccache | ${{ inputs.os }} | ${{ inputs.arch }} | ${{ inputs.toolchain }} | ${{ inputs.cache_key_extra }} | ${{ steps.date-stamp.outputs.timestamp }}
         restore-keys: |
-          "ccache" | "${{ inputs.os }}" | "${{ inputs.arch }}" | "${{ inputs.toolchain }}" | "${{ inputs.cache_key_extra }}"
+          ccache | ${{ inputs.os }} | ${{ inputs.arch }} | ${{ inputs.toolchain }} | ${{ inputs.cache_key_extra }}
 
     - name: 'Configure Compiler Cache'
-      if: ${{ inputs.os != 'Windows' && inputs.ccache_path != '' }}
+      if: ${{ inputs.os != 'Windows' }}
       shell: bash
       env:
         CCACHE_DIR: ${{ inputs.ccache_path }}
@@ -64,7 +63,7 @@ runs:
           ccache -z
 
     - name: 'Configure Compiler Cache (Windows)'
-      if: ${{ inputs.os == 'Windows' && inputs.ccache_path != '' }}
+      if: ${{ inputs.os == 'Windows' }}
       shell: pwsh
       env:
         CCACHE_DIR: ${{ inputs.ccache_path }}
@@ -82,10 +81,9 @@ runs:
 
     - name: 'Restore vcpkg cache'
       uses: actions/cache/restore@v4
-      if: ${{ inputs.vcpkg_cache_path != '' }}
       id: 'vcpkg'
       with:
         path: ${{ inputs.vcpkg_cache_path }}
-        key: '"vcpkg" | "${{ inputs.os }}" | "${{ inputs.arch }}" | "${{ inputs.toolchain }}" | "${{ inputs.cache_key_extra }}" | ${{ steps.date-stamp.outputs.timestamp }}'
+        key: vcpkg | ${{ inputs.os }} | ${{ inputs.arch }} | ${{ inputs.toolchain }} | ${{ inputs.cache_key_extra }} | ${{ hashFiles('vcpkg.json') }}
         restore-keys: |
-          "vcpkg" | "${{ inputs.os }}" | "${{ inputs.arch }}" | "${{ inputs.toolchain }}" | "${{ inputs.cache_key_extra }}"
+          vcpkg | ${{ inputs.os }} | ${{ inputs.arch }} | ${{ inputs.toolchain }} | ${{ inputs.cache_key_extra }}
