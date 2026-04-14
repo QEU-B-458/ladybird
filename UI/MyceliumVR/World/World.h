@@ -66,14 +66,18 @@ public:
     Vector<Entity> const& entities() const { return m_entities; }
     size_t alive_entity_count() const;
     size_t dirty_transform_count() const;
-    bool geometry_dirty() const { return m_geometry_dirty; }
+    // layout_dirty: mesh/entity structure changed → full vertex buffer rebuild required.
+    bool layout_dirty() const { return m_layout_dirty; }
+    // transform_dirty: at least one entity transform changed → instance buffer update required.
+    bool transform_dirty() const { return m_transform_dirty; }
     void clear_dirty_flags();
 
 private:
     EntityId m_next_entity_id { 1 };
     Vector<Entity> m_entities;
     HashMap<EntityId, size_t> m_entity_indices;
-    bool m_geometry_dirty { true };
+    bool m_layout_dirty { true };    // spawn/destroy/set_mesh/set_material/set_normal_map/create_panel
+    bool m_transform_dirty { true }; // set_transform (also set whenever layout_dirty is set)
 };
 
 }

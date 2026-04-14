@@ -17,7 +17,10 @@
 #include "BridgeRegistry.h"
 #include "ScriptRuntime.h"
 
+#include "../Support/GltfLoader.h"
+
 #include <AK/Format.h>
+#include <AK/Math.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/PrimitiveString.h>
@@ -35,7 +38,7 @@ namespace MyceliumVR::BridgeFunctions {
 // ============================================================
 
 // Must match the number of impl blocks in bind_all().
-static constexpr size_t BRIDGE_FUNCTION_COUNT = 22;
+static constexpr size_t BRIDGE_FUNCTION_COUNT = 23;
 
 static BridgeFunction const s_metadata[BRIDGE_FUNCTION_COUNT] = {
     // -- Debug --
@@ -150,6 +153,14 @@ static BridgeFunction const s_metadata[BRIDGE_FUNCTION_COUNT] = {
         .arguments = { { "entity"sv, BridgeValueType::EntityId }, { "path"sv, BridgeValueType::String } },
         .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = true,
         .throws = "RangeError for invalid EntityId."sv,
+    },
+    {
+        .module = "Render"sv, .js_namespace = ""sv, .name = "spawnScene"sv,
+        .description = "Load a glTF asset and spawn one entity per (node × primitive), applying each node's world transform. Returns an Array of EntityId numbers."sv,
+        .return_type = BridgeValueType::Number, // Array, approximated
+        .arguments = { { "path"sv, BridgeValueType::String } },
+        .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = false,
+        .throws = "Error if the scene fails to load or no VFS is available."sv,
     },
     // -- Camera --
     {
@@ -272,6 +283,59 @@ ReadonlySpan<BridgeFunction> all_metadata()
 // Update BRIDGE_FUNCTION_COUNT when adding entries to both sections.
 // ============================================================
 
+// Decompose a column-major 4×4 TRS matrix into translation, quaternion, and scale.
+// Assumes no shear (pure TRS). Output quaternion is XYZW.
+static void mat4_decompose_trs(float const m[16],
+    float& px, float& py, float& pz,
+    float& qx, float& qy, float& qz, float& qw,
+    float& sx, float& sy, float& sz)
+{
+    // Translation
+    px = m[12]; py = m[13]; pz = m[14];
+
+    // Scale = length of each column
+    sx = AK::sqrt(m[0]*m[0] + m[1]*m[1] + m[2]*m[2]);
+    sy = AK::sqrt(m[4]*m[4] + m[5]*m[5] + m[6]*m[6]);
+    sz = AK::sqrt(m[8]*m[8] + m[9]*m[9] + m[10]*m[10]);
+
+    if (sx < 1e-6f) sx = 1.0f;
+    if (sy < 1e-6f) sy = 1.0f;
+    if (sz < 1e-6f) sz = 1.0f;
+
+    // Rotation matrix (columns normalised)
+    float r00 = m[0]/sx, r10 = m[1]/sx, r20 = m[2]/sx;
+    float r01 = m[4]/sy, r11 = m[5]/sy, r21 = m[6]/sy;
+    float r02 = m[8]/sz, r12 = m[9]/sz, r22 = m[10]/sz;
+
+    // Quaternion from rotation matrix — Shepperd's method
+    float trace = r00 + r11 + r22;
+    if (trace > 0.0f) {
+        float s = 0.5f / AK::sqrt(trace + 1.0f);
+        qw = 0.25f / s;
+        qx = (r21 - r12) * s;
+        qy = (r02 - r20) * s;
+        qz = (r10 - r01) * s;
+    } else if (r00 > r11 && r00 > r22) {
+        float s = 2.0f * AK::sqrt(1.0f + r00 - r11 - r22);
+        qw = (r21 - r12) / s;
+        qx = 0.25f * s;
+        qy = (r01 + r10) / s;
+        qz = (r02 + r20) / s;
+    } else if (r11 > r22) {
+        float s = 2.0f * AK::sqrt(1.0f + r11 - r00 - r22);
+        qw = (r02 - r20) / s;
+        qx = (r01 + r10) / s;
+        qy = 0.25f * s;
+        qz = (r12 + r21) / s;
+    } else {
+        float s = 2.0f * AK::sqrt(1.0f + r22 - r00 - r11);
+        qw = (r10 - r01) / s;
+        qx = (r02 + r20) / s;
+        qy = (r12 + r21) / s;
+        qz = 0.25f * s;
+    }
+}
+
 static JS::ThrowCompletionOr<EntityId> validated_entity(JS::VM& vm, BridgeBackend& backend, size_t arg_index, StringView op)
 {
     auto entity = TRY(vm.argument(arg_index).to_u32(vm));
@@ -393,6 +457,48 @@ void bind_all(
         auto normal_map = TRY(vm.argument(1).to_string(vm));
         return JS::Value(runtime.bridge_backend().set_normal_map(entity, move(normal_map)));
     }, 2); // setNormalMap
+
+    reg(mycelium, [&runtime, &realm](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto path = TRY(vm.argument(0).to_string(vm));
+
+        auto* vfs = runtime.virtual_file_system();
+        if (!vfs)
+            return vm.throw_completion<JS::Error>(MUST(String::from_utf8("spawnScene: no virtual file system available"sv)));
+
+        GltfLoader loader(*vfs);
+        auto scene_result = loader.load_scene(path.bytes_as_string_view());
+        if (scene_result.is_error())
+            return vm.throw_completion<JS::Error>(MUST(String::formatted("spawnScene: failed to load '{}': {}", path, scene_result.error().string_literal())));
+        auto scene = scene_result.release_value();
+
+        auto array = TRY(JS::Array::create(realm, 0));
+        u32 arr_index = 0;
+
+        for (auto const& node : scene.nodes) {
+            if (node.mesh_index < 0)
+                continue;
+
+            auto entity = runtime.bridge_backend().spawn_entity();
+
+            // Sub-mesh key: "path#N" — MeshLibrary will resolve this at render time
+            auto sub_path = MUST(String::formatted("{}#{}", path, arr_index));
+            runtime.bridge_backend().set_mesh(entity, sub_path);
+
+            // Material alias registered in MeshLibrary during resolve_mesh("path")
+            if (!node.material_name.is_empty() && node.material_name != "default"_string)
+                runtime.bridge_backend().set_material(entity, node.material_name);
+
+            // Decompose node world matrix into TRS for setTransform
+            float px, py, pz, qx, qy, qz, qw, sx, sy, sz;
+            mat4_decompose_trs(node.world_matrix, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
+            runtime.bridge_backend().set_transform(entity, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
+
+            TRY(array->create_data_property_or_throw(arr_index, JS::Value(entity)));
+            ++arr_index;
+        }
+
+        return JS::Value(array);
+    }, 1); // spawnScene
 
     // -- Camera --
     reg(mycelium, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {

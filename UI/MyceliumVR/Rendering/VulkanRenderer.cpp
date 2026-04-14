@@ -52,6 +52,8 @@ struct DrawGroup {
     // Uploaded to aabb_world_buffer and tested by the frustum culling compute shader.
     float aabb_world_min[3] { 1e30f, 1e30f, 1e30f };   // start at +∞ (no instances yet)
     float aabb_world_max[3] { -1e30f, -1e30f, -1e30f }; // start at -∞
+    // Entity IDs for each instance in draw order — used by rebuild_transforms_only.
+    Vector<EntityId> instance_entity_ids;
 };
 
 struct VulkanRenderer::Impl {
@@ -440,6 +442,35 @@ static void expand_group_aabb(DrawGroup& group, Transform const& transform)
     }
 }
 
+// Rebuild only instance matrices and world AABBs from current entity transforms.
+// The vertex buffer and draw groups are reused unchanged — only call when layout_dirty is false.
+static void rebuild_transforms_only(World const& world, Vector<DrawGroup>& groups, Vector<float>& out_instance_data)
+{
+    out_instance_data.clear();
+    for (auto& group : groups) {
+        // Reset world AABB for this group.
+        group.aabb_world_min[0] = group.aabb_world_min[1] = group.aabb_world_min[2] = 1e30f;
+        group.aabb_world_max[0] = group.aabb_world_max[1] = group.aabb_world_max[2] = -1e30f;
+
+        group.first_instance = static_cast<u32>(out_instance_data.size()) / 16;
+        for (auto entity_id : group.instance_entity_ids) {
+            auto const* entity = world.entity(entity_id);
+            if (!entity || !entity->alive) {
+                // Entity was destroyed — push identity so instance count stays consistent.
+                static constexpr Array<float, 16> identity {
+                    1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
+                };
+                for (auto f : identity)
+                    out_instance_data.append(f);
+                continue;
+            }
+            for (auto f : make_trs_matrix(entity->transform))
+                out_instance_data.append(f);
+            expand_group_aabb(group, entity->transform);
+        }
+    }
+}
+
 static Array<float, 3> color_for_material(String const& material)
 {
     if (material == "accent"_string)
@@ -540,7 +571,7 @@ static Vector<Vertex> build_world_vertices(World const& world, MeshLibrary& mesh
 
         auto range_count = static_cast<u32>(vertices.size()) - range_first;
         if (range_count > 0)
-            out_ranges.append({ .material = entity.mesh_renderer.material, .normal_map = {}, .first_vertex = range_first, .vertex_count = range_count });
+            out_ranges.append({ .material = entity.mesh_renderer.material, .normal_map = {}, .first_vertex = range_first, .vertex_count = range_count, .instance_entity_ids = {} });
     }
 
     return vertices;
@@ -675,6 +706,7 @@ static void build_world_instanced(
         }
 
         group_instances[group_idx].append(make_trs_matrix(entity.transform));
+        out_groups[group_idx].instance_entity_ids.append(entity.id);
         // Expand this group's world-space AABB to include this instance.
         expand_group_aabb(out_groups[group_idx], entity.transform);
     }
@@ -3084,7 +3116,8 @@ static ErrorOr<void> draw_frame(VulkanRenderer::Impl& impl, VulkanRenderer::Came
     Vector<VkDrawIndirectCommand> indirect_commands; // one per draw group; uploaded alongside vertex data
     Vector<TexturedVertex> panel_vertices;
     Vector<TexturedVertex> overlay_vertices;
-    bool world_vertices_dirty = false;
+    bool world_vertices_dirty = false;   // full vertex + instance + indirect rebuild needed
+    bool world_instances_dirty = false;  // instance buffer + AABB only (transform-only update)
     bool panel_vertices_dirty = false;
 
     // Identity matrix instance for probe/empty-world fallback — the pipeline always expects binding 1.
@@ -3100,7 +3133,8 @@ static ErrorOr<void> draw_frame(VulkanRenderer::Impl& impl, VulkanRenderer::Came
         for (auto f : identity_instance)
             world_instance_data.append(f);
         world_vertices_dirty = true;
-    } else if (world->geometry_dirty() || impl.world_vertex_buffer.buffer == VK_NULL_HANDLE) {
+    } else if (world->layout_dirty() || impl.world_vertex_buffer.buffer == VK_NULL_HANDLE) {
+        // Structure changed (spawn/destroy/mesh/material) — full vertex buffer rebuild.
         impl.world_draw_groups.clear();
         build_world_instanced(*world, *impl.mesh_library, world_vertices, world_instance_data, impl.world_draw_groups);
         // Build indirect draw commands — one entry per draw group.
@@ -3125,6 +3159,10 @@ static ErrorOr<void> draw_frame(VulkanRenderer::Impl& impl, VulkanRenderer::Came
 
         panel_vertices = build_panel_vertices(*world);
         panel_vertices_dirty = true;
+    } else if (world->transform_dirty() && !impl.world_draw_groups.is_empty()) {
+        // Only transforms changed — rebuild instance matrices and AABBs, keep vertex buffer as-is.
+        rebuild_transforms_only(*world, impl.world_draw_groups, world_instance_data);
+        world_instances_dirty = true;
     }
 
     if (overlay_view && !overlay_view->pixels.is_empty() && overlay_view->width > 0 && overlay_view->height > 0)
@@ -3202,6 +3240,13 @@ static ErrorOr<void> draw_frame(VulkanRenderer::Impl& impl, VulkanRenderer::Came
         TRY(upload_buffer_device_local(impl, indirect_commands, impl.indirect_draw_buffer,
             VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT));
         impl.indirect_draw_count = static_cast<u32>(indirect_commands.size());
+    }
+    if (world_vertices_dirty || world_instances_dirty) {
+        if (world_instances_dirty) {
+            // Transform-only path: re-upload instance buffer in-place (no vertex or indirect rebuild).
+            TRY(upload_vertices_device_local(impl, world_instance_data, impl.world_instance_buffer));
+            impl.world_instance_count = static_cast<u32>(world_instance_data.size()) / 16;
+        }
 
         // Build and upload per-group world-space AABBs (GroupAABB = vec4 min + vec4 max = 32 bytes).
         struct GroupAABBGPU { float min[4]; float max[4]; }; // w components are padding
@@ -3217,6 +3262,8 @@ static ErrorOr<void> draw_frame(VulkanRenderer::Impl& impl, VulkanRenderer::Came
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT));
 
         // Update the culling descriptor set to point at the new buffer addresses.
+        // (Always needed after a full rebuild; safe to re-bind on transform-only too since
+        //  the buffer objects themselves are reused — only contents change.)
         if (impl.cull_descriptor_set != VK_NULL_HANDLE
             && impl.indirect_ref_buffer.buffer != VK_NULL_HANDLE
             && impl.indirect_draw_buffer.buffer != VK_NULL_HANDLE

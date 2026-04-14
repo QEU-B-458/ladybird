@@ -15,7 +15,7 @@ function start() {
     );
 
     panelEntity = mycelium.spawnEntity();
-    mycelium.createPanel(panelEntity, "about:newtab", 1.8, 1.1);
+    mycelium.createPanel(panelEntity, "https://e621.net", 1.8, 1.1);
     mycelium.setTransform(
         panelEntity,
         2.1, 0.4, -0.5,

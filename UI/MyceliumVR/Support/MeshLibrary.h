@@ -41,8 +41,10 @@ public:
 
 private:
     ErrorOr<MeshAsset> load_mesh(String const& mesh_name);
+    ErrorOr<void> load_and_register_scene_sub_meshes(String const& base_path, GltfSceneAsset const& scene);
     static MeshAsset make_cube_mesh();
     static ErrorOr<MeshAsset> make_mesh_from_gltf_scene(GltfSceneAsset const&);
+    static ErrorOr<MeshAsset> make_sub_mesh_from_node(GltfSceneAsset const&, GltfNodeAsset const&);
 
     VirtualFileSystem const* m_file_system { nullptr };
     MaterialLibrary* m_material_library { nullptr };

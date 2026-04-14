@@ -59,10 +59,24 @@ struct GltfMaterialAsset {
     AlphaMode alpha_mode { AlphaMode::Opaque };
 };
 
+// One entry per (node × primitive) in the glTF scene graph.
+// world_matrix is pre-multiplied parent-to-root, column-major.
+// Use these to spawn one entity per entry with the correct transform and material.
+struct GltfNodeAsset {
+    String name;
+    int32_t mesh_index { -1 };     // index into GltfSceneAsset::meshes
+    int32_t primitive_index { 0 }; // index into meshes[mesh_index].primitives
+    float world_matrix[16] {       // column-major 4×4, identity by default
+        1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
+    };
+    String material_name; // glTF material name for this primitive
+};
+
 struct GltfSceneAsset {
     String name;
     Vector<GltfMeshAsset> meshes;
     Vector<GltfMaterialAsset> materials;
+    Vector<GltfNodeAsset> nodes; // one entry per (node × primitive) in scene graph
 };
 
 class GltfLoader {

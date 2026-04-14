@@ -8,6 +8,7 @@
 #include "VirtualFileSystem.h"
 
 #include <AK/ByteString.h>
+#include <cstdlib>
 
 #define TINYGLTF3_IMPLEMENTATION
 #pragma GCC diagnostic push
@@ -149,6 +150,156 @@ static Optional<int32_t> find_attribute_accessor(tg3_primitive const& primitive,
     return {};
 }
 
+// ── Matrix helpers for node-transform traversal ────────────────────────────────
+
+// Column-major 4×4 multiply: out = a * b
+static void mat4_mul(float const a[16], float const b[16], float out[16])
+{
+    for (int col = 0; col < 4; ++col) {
+        for (int row = 0; row < 4; ++row) {
+            float s = 0.0f;
+            for (int k = 0; k < 4; ++k)
+                s += a[k * 4 + row] * b[col * 4 + k];
+            out[col * 4 + row] = s;
+        }
+    }
+}
+
+// Build a column-major 4×4 from glTF node TRS (doubles → floats).
+// q = (x,y,z,w), t = (x,y,z), s = (x,y,z)
+static void trs_to_mat4(double const t[3], double const q[4], double const s[3], float out[16])
+{
+    double qx = q[0], qy = q[1], qz = q[2], qw = q[3];
+
+    // Rotation matrix (column-major) — standard quat→mat formula
+    double r00 = 1.0 - 2.0*(qy*qy + qz*qz);
+    double r10 = 2.0*(qx*qy + qz*qw);
+    double r20 = 2.0*(qx*qz - qy*qw);
+
+    double r01 = 2.0*(qx*qy - qz*qw);
+    double r11 = 1.0 - 2.0*(qx*qx + qz*qz);
+    double r21 = 2.0*(qy*qz + qx*qw);
+
+    double r02 = 2.0*(qx*qz + qy*qw);
+    double r12 = 2.0*(qy*qz - qx*qw);
+    double r22 = 1.0 - 2.0*(qx*qx + qy*qy);
+
+    // Column 0: R[:,0] * scale.x
+    out[0]  = static_cast<float>(r00 * s[0]);
+    out[1]  = static_cast<float>(r10 * s[0]);
+    out[2]  = static_cast<float>(r20 * s[0]);
+    out[3]  = 0.0f;
+    // Column 1: R[:,1] * scale.y
+    out[4]  = static_cast<float>(r01 * s[1]);
+    out[5]  = static_cast<float>(r11 * s[1]);
+    out[6]  = static_cast<float>(r21 * s[1]);
+    out[7]  = 0.0f;
+    // Column 2: R[:,2] * scale.z
+    out[8]  = static_cast<float>(r02 * s[2]);
+    out[9]  = static_cast<float>(r12 * s[2]);
+    out[10] = static_cast<float>(r22 * s[2]);
+    out[11] = 0.0f;
+    // Column 3: translation
+    out[12] = static_cast<float>(t[0]);
+    out[13] = static_cast<float>(t[1]);
+    out[14] = static_cast<float>(t[2]);
+    out[15] = 1.0f;
+}
+
+// Recursively walk the node tree, accumulating world matrices.
+// For each node that references a mesh, emit one GltfNodeAsset per primitive.
+static void traverse_nodes(
+    tg3_model const& model,
+    int32_t node_index,
+    float const parent_matrix[16],
+    GltfSceneAsset& scene)
+{
+    if (node_index < 0 || static_cast<uint32_t>(node_index) >= model.nodes_count)
+        return;
+
+    auto const& node = model.nodes[node_index];
+
+    // Build this node's local matrix
+    float local[16];
+    if (node.has_matrix) {
+        for (int i = 0; i < 16; ++i)
+            local[i] = static_cast<float>(node.matrix[i]);
+    } else {
+        trs_to_mat4(node.translation, node.rotation, node.scale, local);
+    }
+
+    // World matrix = parent * local
+    float world[16];
+    mat4_mul(parent_matrix, local, world);
+
+    // Emit one GltfNodeAsset per mesh primitive on this node
+    if (node.mesh >= 0 && static_cast<uint32_t>(node.mesh) < model.meshes_count) {
+        auto const& gltf_mesh = model.meshes[node.mesh];
+        // Find which index in scene.meshes this corresponds to (meshes are added in order)
+        int32_t scene_mesh_index = static_cast<int32_t>(node.mesh);
+
+        for (uint32_t prim_index = 0; prim_index < gltf_mesh.primitives_count; ++prim_index) {
+            auto const& prim = gltf_mesh.primitives[prim_index];
+            GltfNodeAsset na;
+            na.name = tg3_string_to_ak_string(node.name);
+            na.mesh_index = scene_mesh_index;
+            na.primitive_index = static_cast<int32_t>(prim_index);
+            for (int i = 0; i < 16; ++i)
+                na.world_matrix[i] = world[i];
+
+            // Material name from the primitive — use synthetic "materialN" for unnamed
+            // materials (matching the naming in load_scene's material loop) so the
+            // renderer can look up the correct MaterialAsset even when glTF materials
+            // have no name field (e.g. Sponza from glTF-Sample-Assets).
+            if (prim.material >= 0 && static_cast<uint32_t>(prim.material) < model.materials_count) {
+                na.material_name = tg3_string_to_ak_string(model.materials[prim.material].name);
+                if (na.material_name.is_empty())
+                    na.material_name = MUST(String::formatted("material{}", prim.material));
+            } else {
+                na.material_name = "default"_string;
+            }
+
+            scene.nodes.append(move(na));
+        }
+    }
+
+    // Recurse into children
+    for (uint32_t ci = 0; ci < node.children_count; ++ci)
+        traverse_nodes(model, node.children[ci], world, scene);
+}
+
+// ── VFS filesystem callbacks for tg3_parse_options ────────────────────────────
+// Lets TinyGLTF3 load external .bin buffers and loose texture files through our
+// VirtualFileSystem instead of raw fopen(). user_data = VirtualFileSystem const*.
+
+static int32_t vfs_read_file(uint8_t** out_data, uint64_t* out_size,
+    char const* path, uint32_t path_len, void* user_data)
+{
+    auto* vfs = static_cast<VirtualFileSystem const*>(user_data);
+    auto result = vfs->read_file(StringView { path, path_len });
+    if (result.is_error())
+        return 0;
+    auto buf = result.release_value();
+    auto* bytes = static_cast<uint8_t*>(::malloc(buf.size()));
+    if (!bytes)
+        return 0;
+    ::memcpy(bytes, buf.data(), buf.size());
+    *out_data = bytes;
+    *out_size = static_cast<uint64_t>(buf.size());
+    return 1;
+}
+
+static void vfs_free_file(uint8_t* data, uint64_t, void*)
+{
+    ::free(data);
+}
+
+static int32_t vfs_file_exists(char const* path, uint32_t path_len, void* user_data)
+{
+    auto* vfs = static_cast<VirtualFileSystem const*>(user_data);
+    return vfs->exists(StringView { path, path_len }) ? 1 : 0;
+}
+
 GltfLoader::GltfLoader(VirtualFileSystem const& file_system)
     : m_file_system(file_system)
 {
@@ -164,13 +315,30 @@ ErrorOr<GltfSceneAsset> GltfLoader::load_scene(StringView virtual_path) const
     tg3_error_stack_init(&errors);
     tg3_parse_options_init(&options);
 
+    // Don't decode image pixels — we read raw bytes ourselves via resolve_texture_slot.
+    options.images_as_is = 1;
+
+    // Wire VFS filesystem callbacks so external .bin buffers and loose texture
+    // URIs are loaded through our VirtualFileSystem, not raw fopen().
+    options.fs.read_file   = vfs_read_file;
+    options.fs.free_file   = vfs_free_file;
+    options.fs.file_exists = vfs_file_exists;
+    options.fs.user_data   = const_cast<VirtualFileSystem*>(&m_file_system);
+
+    // Extract the directory portion of virtual_path as base_dir.
+    // For "world://pkg/assets/Sponza.gltf" this is "world://pkg/assets".
+    // TinyGLTF3 prepends base_dir + "/" to relative URIs in buffers and images.
+    StringView base_dir;
+    if (auto slash = virtual_path.find_last('/'); slash.has_value())
+        base_dir = virtual_path.substring_view(0, *slash);
+
     auto parse_result = tg3_parse_auto(
         &model,
         &errors,
         reinterpret_cast<uint8_t const*>(source.data()),
         source.size(),
-        nullptr,
-        0,
+        base_dir.is_empty() ? nullptr : base_dir.characters_without_null_termination(),
+        static_cast<uint32_t>(base_dir.length()),
         &options);
 
     if (parse_result != TG3_OK) {
@@ -196,10 +364,13 @@ ErrorOr<GltfSceneAsset> GltfLoader::load_scene(StringView virtual_path) const
             auto const& primitive = mesh.primitives[primitive_index];
             GltfPrimitive primitive_asset;
 
-            if (primitive.material >= 0 && static_cast<uint32_t>(primitive.material) < model.materials_count)
+            if (primitive.material >= 0 && static_cast<uint32_t>(primitive.material) < model.materials_count) {
                 primitive_asset.material_name = tg3_string_to_ak_string(model.materials[primitive.material].name);
-            if (primitive_asset.material_name.is_empty())
+                if (primitive_asset.material_name.is_empty())
+                    primitive_asset.material_name = MUST(String::formatted("material{}", primitive.material));
+            } else {
                 primitive_asset.material_name = "default"_string;
+            }
 
             if (auto positions_accessor_index = find_attribute_accessor(primitive, "POSITION"); positions_accessor_index.has_value()) {
                 if (*positions_accessor_index < 0 || static_cast<uint32_t>(*positions_accessor_index) >= model.accessors_count)
@@ -269,6 +440,39 @@ ErrorOr<GltfSceneAsset> GltfLoader::load_scene(StringView virtual_path) const
             material_asset.alpha_mode = GltfMaterialAsset::AlphaMode::Opaque;
 
         scene.materials.append(move(material_asset));
+    }
+
+    // Build node list: walk the default scene's root nodes, accumulating world matrices.
+    // Each (node × primitive) pair becomes one GltfNodeAsset in scene.nodes.
+    // If the file has no scene graph (only raw meshes), we synthesise one node per mesh
+    // primitive at identity so spawnScene still works for simple single-mesh files.
+    if (model.scenes_count > 0 && model.default_scene >= 0
+        && static_cast<uint32_t>(model.default_scene) < model.scenes_count) {
+        auto const& default_scene = model.scenes[model.default_scene];
+        float identity[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+        for (uint32_t ri = 0; ri < default_scene.nodes_count; ++ri)
+            traverse_nodes(model, default_scene.nodes[ri], identity, scene);
+    } else {
+        // No scene graph: emit one node per (mesh × primitive) at identity.
+        float identity[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+        for (uint32_t mi = 0; mi < model.meshes_count; ++mi) {
+            auto const& gltf_mesh = model.meshes[mi];
+            for (uint32_t pi = 0; pi < gltf_mesh.primitives_count; ++pi) {
+                auto const& prim = gltf_mesh.primitives[pi];
+                GltfNodeAsset na;
+                na.mesh_index = static_cast<int32_t>(mi);
+                na.primitive_index = static_cast<int32_t>(pi);
+                for (int i = 0; i < 16; ++i) na.world_matrix[i] = identity[i];
+                if (prim.material >= 0 && static_cast<uint32_t>(prim.material) < model.materials_count) {
+                    na.material_name = tg3_string_to_ak_string(model.materials[prim.material].name);
+                    if (na.material_name.is_empty())
+                        na.material_name = MUST(String::formatted("material{}", prim.material));
+                } else {
+                    na.material_name = "default"_string;
+                }
+                scene.nodes.append(move(na));
+            }
+        }
     }
 
     tg3_error_stack_free(&errors);

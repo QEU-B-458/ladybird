@@ -52,6 +52,21 @@ ErrorOr<MeshAsset> MeshLibrary::load_mesh(String const& mesh_name)
         return make_cube_mesh();
 
     auto sv = mesh_name.bytes_as_string_view();
+
+    // Sub-mesh path: "world://path/File.glb#N" — return the Nth node's mesh.
+    // Ensure the base path is loaded first (which registers all sub-meshes as a side-effect).
+    if (auto hash_pos = sv.find('#'); hash_pos.has_value()) {
+        auto base_sv = sv.substring_view(0, *hash_pos);
+        auto base_str = TRY(String::from_utf8(base_sv));
+        // Load base (if not cached) — this registers all "base#N" sub-meshes.
+        if (!m_cached_meshes.contains(base_str))
+            TRY(resolve_mesh(base_str)); // fills cache for base and all sub-paths
+        // The sub-mesh should now be in cache.
+        if (auto it = m_cached_meshes.find(mesh_name); it != m_cached_meshes.end())
+            return it->value; // caller will re-insert via resolve_mesh — return a copy here
+        return Error::from_string_literal("Sub-mesh index out of range");
+    }
+
     if (sv.ends_with(".glb"sv) || sv.ends_with(".gltf"sv)) {
         if (!m_file_system)
             return Error::from_string_literal("Cannot load glTF mesh without a virtual file system");
@@ -60,7 +75,6 @@ ErrorOr<MeshAsset> MeshLibrary::load_mesh(String const& mesh_name)
 
         // Register materials from this scene so the renderer can look them up by name.
         if (m_material_library) {
-            // Derive the base VFS directory from the mesh path (strip the filename).
             StringView base_dir = sv;
             if (auto slash = base_dir.find_last('/'); slash.has_value())
                 base_dir = base_dir.substring_view(0, *slash);
@@ -68,17 +82,59 @@ ErrorOr<MeshAsset> MeshLibrary::load_mesh(String const& mesh_name)
                 base_dir = {};
             m_material_library->register_from_gltf(scene, base_dir);
 
-            // Also register the first material under the full mesh path as an alias.
-            // This lets the renderer resolve PBR textures for glTF meshes when the
-            // caller never invoked setMaterial() — the mesh path IS the material key.
             if (!scene.materials.is_empty())
                 m_material_library->register_alias(sv, scene.materials[0].name);
         }
+
+        // Eagerly register all (node × primitive) sub-meshes under "path#N".
+        TRY(load_and_register_scene_sub_meshes(mesh_name, scene));
 
         return make_mesh_from_gltf_scene(scene);
     }
 
     return Error::from_string_literal("Unknown mesh asset id");
+}
+
+// Register one MeshAsset per GltfNodeAsset under "base_path#N".
+// Also registers the per-primitive material alias for each sub-mesh.
+ErrorOr<void> MeshLibrary::load_and_register_scene_sub_meshes(String const& base_path, GltfSceneAsset const& scene)
+{
+    for (size_t i = 0; i < scene.nodes.size(); ++i) {
+        auto const& node = scene.nodes[i];
+        auto sub_key = TRY(String::formatted("{}#{}", base_path, i));
+
+        if (m_cached_meshes.contains(sub_key))
+            continue;
+
+        auto sub_mesh = TRY(make_sub_mesh_from_node(scene, node));
+        m_cached_meshes.set(sub_key, move(sub_mesh));
+
+        if (m_material_library && !node.material_name.is_empty()
+            && node.material_name != "default"_string) {
+            m_material_library->register_alias(sub_key, node.material_name);
+        }
+    }
+    return {};
+}
+
+// Build a MeshAsset for a single (node × primitive) in local primitive space.
+// We do NOT bake the world matrix here — the entity transform set by spawnScene
+// (decomposed from node.world_matrix) is what the renderer uses to place the mesh.
+// Baking and then also setting the entity transform would double-apply it.
+ErrorOr<MeshAsset> MeshLibrary::make_sub_mesh_from_node(GltfSceneAsset const& scene, GltfNodeAsset const& node)
+{
+    if (node.mesh_index < 0 || static_cast<size_t>(node.mesh_index) >= scene.meshes.size())
+        return Error::from_string_literal("Sub-mesh node has invalid mesh_index");
+    auto const& gltf_mesh = scene.meshes[node.mesh_index];
+    if (node.primitive_index < 0 || static_cast<size_t>(node.primitive_index) >= gltf_mesh.primitives.size())
+        return Error::from_string_literal("Sub-mesh node has invalid primitive_index");
+    auto const& prim = gltf_mesh.primitives[node.primitive_index];
+
+    GltfSceneAsset single;
+    GltfMeshAsset single_mesh;
+    single_mesh.primitives.append(prim);
+    single.meshes.append(move(single_mesh));
+    return make_mesh_from_gltf_scene(single);
 }
 
 MeshAsset MeshLibrary::make_cube_mesh()

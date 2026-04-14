@@ -15,7 +15,8 @@ EntityId World::spawn_entity()
     auto id = entity.id;
     m_entity_indices.set(id, m_entities.size());
     m_entities.append(move(entity));
-    m_geometry_dirty = true;
+    m_layout_dirty = true;
+    m_transform_dirty = true;
     return id;
 }
 
@@ -27,7 +28,8 @@ bool World::destroy_entity(EntityId id)
 
     m_entities[*index].alive = false;
     m_entity_indices.remove(id);
-    m_geometry_dirty = true;
+    m_layout_dirty = true;
+    m_transform_dirty = true;
     return true;
 }
 
@@ -55,7 +57,7 @@ bool World::set_transform(EntityId id, Transform const& transform)
 
     entity->transform = transform;
     entity->transform_dirty = true;
-    m_geometry_dirty = true;
+    m_transform_dirty = true;
     return true;
 }
 
@@ -67,7 +69,8 @@ bool World::set_mesh(EntityId id, String mesh)
 
     entity->mesh_renderer.mesh = move(mesh);
     entity->mesh_renderer.dirty = true;
-    m_geometry_dirty = true;
+    m_layout_dirty = true;
+    m_transform_dirty = true;
     return true;
 }
 
@@ -79,7 +82,8 @@ bool World::set_material(EntityId id, String material)
 
     entity->mesh_renderer.material = move(material);
     entity->mesh_renderer.dirty = true;
-    m_geometry_dirty = true;
+    m_layout_dirty = true;
+    m_transform_dirty = true;
     return true;
 }
 
@@ -90,7 +94,8 @@ bool World::set_normal_map(EntityId id, String normal_map)
         return false;
     entity->mesh_renderer.normal_map = move(normal_map);
     entity->mesh_renderer.dirty = true;
-    m_geometry_dirty = true;
+    m_layout_dirty = true;
+    m_transform_dirty = true;
     return true;
 }
 
@@ -106,7 +111,8 @@ bool World::create_panel(EntityId id, String url, float width, float height)
         .height = height,
         .dirty = true,
     };
-    m_geometry_dirty = true;
+    m_layout_dirty = true;
+    m_transform_dirty = true;
     return true;
 }
 
@@ -138,7 +144,8 @@ void World::clear_dirty_flags()
         if (entity.panel.has_value())
             entity.panel->dirty = false;
     }
-    m_geometry_dirty = false;
+    m_layout_dirty = false;
+    m_transform_dirty = false;
 }
 
 }
