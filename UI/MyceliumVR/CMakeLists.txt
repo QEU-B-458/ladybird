@@ -7,32 +7,50 @@ find_package(unofficial-shaderc CONFIG QUIET)
 add_executable(ladybird
     main.cpp
     Application.h
-    Engine/BridgeBackend.h
-    Engine/BridgeBackend.cpp
-    Engine/BridgeRegistry.h
-    Engine/BridgeRegistry.cpp
     Engine/Engine.h
     Engine/Engine.cpp
-    Engine/Renderer.h
-    Engine/Renderer.cpp
-    Engine/SDKGenerator.h
-    Engine/SDKGenerator.cpp
-    Engine/Session.h
-    Engine/Session.cpp
-    Engine/ShaderCompiler.h
-    Engine/ShaderCompiler.cpp
-    Engine/ScriptRuntime.h
-    Engine/ScriptRuntime.cpp
-    Engine/VirtualFileSystem.h
-    Engine/VirtualFileSystem.cpp
-    Engine/VulkanProbe.h
-    Engine/VulkanProbe.cpp
-    Engine/WorldManifest.h
-    Engine/WorldManifest.cpp
-    Engine/World.h
-    Engine/World.cpp
-    WebContentView.h
-    WebContentView.cpp
+    Rendering/Renderer.h
+    Rendering/Renderer.cpp
+    Rendering/OverlayManager.h
+    Rendering/OverlayManager.cpp
+    Rendering/VulkanProbe.h
+    Rendering/VulkanProbe.cpp
+    Rendering/TextureLibrary.h
+    Rendering/TextureLibrary.cpp
+    Rendering/VulkanRenderer.h
+    Rendering/VulkanRenderer.cpp
+    Rendering/WebViewManager.h
+    Rendering/WebViewManager.cpp
+    Rendering/WebContentView.h
+    Rendering/WebContentView.cpp
+    Scripting/BridgeBackend.h
+    Scripting/BridgeBackend.cpp
+    Scripting/BridgeFunctions.h
+    Scripting/BridgeFunctions.cpp
+    Scripting/BridgeRegistry.h
+    Scripting/BridgeRegistry.cpp
+    Scripting/SDKGenerator.h
+    Scripting/SDKGenerator.cpp
+    Scripting/ScriptRuntime.h
+    Scripting/ScriptRuntime.cpp
+    Support/ShaderCompiler.h
+    Support/ShaderCompiler.cpp
+    Support/GltfLoader.h
+    Support/GltfLoader.cpp
+    Support/MeshLibrary.h
+    Support/MeshLibrary.cpp
+    Support/MaterialLibrary.h
+    Support/MaterialLibrary.cpp
+    Support/InputState.h
+    Support/InputState.cpp
+    Support/VirtualFileSystem.h
+    Support/VirtualFileSystem.cpp
+    World/Session.h
+    World/Session.cpp
+    World/WorldManifest.h
+    World/WorldManifest.cpp
+    World/World.h
+    World/World.cpp
 )
 
 if (HAS_VULKAN)
@@ -75,6 +93,7 @@ endif()
 
 target_link_libraries(ladybird PRIVATE
     SDL3::SDL3
+    LibCrypto
     LibWebView
     LibWeb
     LibGfx

@@ -5,14 +5,16 @@
 
 #pragma once
 
-#include "Renderer.h"
-#include "Session.h"
+#include "../Rendering/Renderer.h"
+#include "../World/Session.h"
 
 namespace MyceliumVR {
 
+class VirtualFileSystem;
+
 class Engine {
 public:
-    explicit Engine(SDL_Renderer&);
+    explicit Engine(SDL_Window&, VirtualFileSystem const* = nullptr);
 
     Session& session() { return m_session; }
     Session const& session() const { return m_session; }
@@ -24,9 +26,14 @@ public:
     World const& world() const { return active_world(); }
 
     Renderer& renderer() { return m_renderer; }
+    Renderer const& renderer() const { return m_renderer; }
+    void set_camera_state(VulkanRenderer::CameraState const& camera_state) { m_renderer.set_camera_state(camera_state); }
+    VulkanRenderer::CameraState camera_state() const { return m_renderer.camera_state(); }
+    void set_scene_light(VulkanRenderer::SceneLightData const& light) { m_renderer.set_scene_light(light); }
+    VulkanRenderer::SceneLightData scene_light() const { return m_renderer.scene_light(); }
 
     void resize(int width, int height);
-    void render();
+    ErrorOr<void> render();
 
 private:
     Session m_session;

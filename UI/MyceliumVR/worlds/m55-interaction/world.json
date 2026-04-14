@@ -1,0 +1,14 @@
+{
+  "format": "mycelium.world",
+  "version": 1,
+  "package": "m55-interaction",
+  "name": "Milestone 5.5 — Desktop Interaction",
+  "entry": {
+    "script": "scripts/main.js"
+  },
+  "permissions": {
+    "storage": false,
+    "network": false,
+    "wasm": false
+  }
+}

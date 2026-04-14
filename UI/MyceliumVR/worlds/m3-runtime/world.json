@@ -1,0 +1,14 @@
+{
+  "format": "mycelium.world",
+  "version": 1,
+  "package": "m3-runtime",
+  "name": "Milestone 3 — JS Runtime",
+  "entry": {
+    "script": "scripts/main.js"
+  },
+  "permissions": {
+    "storage": false,
+    "network": false,
+    "wasm": false
+  }
+}

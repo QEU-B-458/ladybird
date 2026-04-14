@@ -80,6 +80,28 @@ export interface MyceliumNative {
   /** Throws: RangeError for invalid EntityId. */
   createPanel(entity: EntityId, url: string, width: number, height: number): boolean;
 
+  /**
+   * Set the scene ambient light color and intensity.
+   * Affects all mesh entities via the lighting shader.
+   */
+  setAmbientLight(r: number, g: number, b: number, intensity: number): void;
+
+  /**
+   * Set the scene directional light.
+   * toX/toY/toZ is the direction *toward* the light source (normalized by the shader).
+   * r/g/b is the light color; intensity scales it.
+   */
+  setDirectionalLight(toX: number, toY: number, toZ: number, r: number, g: number, b: number, intensity: number): void;
+
+  /**
+   * Return the current scene light state, or null if no renderer is available.
+   */
+  getSceneLight(): {
+    ambientR: number; ambientG: number; ambientB: number; ambientIntensity: number;
+    lightToX: number; lightToY: number; lightToZ: number; lightIntensity: number;
+    lightR: number; lightG: number; lightB: number;
+  } | null;
+
 }
 
 export interface EntityHandle {

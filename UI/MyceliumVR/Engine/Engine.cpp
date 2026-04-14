@@ -7,8 +7,8 @@
 
 namespace MyceliumVR {
 
-Engine::Engine(SDL_Renderer& renderer)
-    : m_renderer(renderer)
+Engine::Engine(SDL_Window& window, VirtualFileSystem const* file_system)
+    : m_renderer(window, file_system)
 {
 }
 
@@ -17,10 +17,11 @@ void Engine::resize(int width, int height)
     m_renderer.resize(width, height);
 }
 
-void Engine::render()
+ErrorOr<void> Engine::render()
 {
-    m_renderer.draw_world(m_session.active_world());
+    TRY(m_renderer.draw_world(m_session.active_world()));
     m_session.active_world().clear_dirty_flags();
+    return {};
 }
 
 }

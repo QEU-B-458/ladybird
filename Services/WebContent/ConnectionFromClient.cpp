@@ -447,6 +447,12 @@ void ConnectionFromClient::debug_request(u64 page_id, ByteString request, ByteSt
         Web::ContentFilter::the().set_filtering_enabled(argument == "on");
         return;
     }
+
+    if (request == "transparent-top-level-canvas") {
+        page->set_paints_transparent_top_level_canvas(argument == "on");
+        page->page().top_level_traversable()->set_needs_repaint();
+        return;
+    }
 }
 
 void ConnectionFromClient::get_source(u64 page_id)

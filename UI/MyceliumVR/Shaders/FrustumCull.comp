@@ -1,0 +1,125 @@
+/*
+ * MyceliumVR - a social VR platform built on the Ladybird browser engine
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * FrustumCull.comp — GPU frustum culling pass (Milestone 2.5.5)
+ *
+ * One invocation per draw group. Reads the group's world-space AABB from aabb_buffer,
+ * tests it against the view-frustum planes extracted from the VP matrix, and either
+ * copies the reference draw command to the live draw buffer unchanged (visible) or
+ * zeroes out instanceCount so vkCmdDrawIndirect skips the group entirely (culled).
+ *
+ * The reference buffer is uploaded once by the CPU when geometry changes.
+ * This compute pass runs every frame to regenerate the live buffer with current
+ * camera frustum planes — no CPU readback, no stall.
+ *
+ * Algorithm: Gribb-Hartmann plane extraction from the column-major VP matrix.
+ *   plane = col[3] +/- col[i]   (gives the 6 clip-space planes as vec4 normal+offset)
+ * Visibility test: P-vertex optimisation — for each plane, find the AABB corner
+ *   closest to the plane normal; if that corner is still outside, the whole AABB is culled.
+ *
+ * For the reversed-Z infinite projection used in MyceliumVR (near=1, far→0, no far clip):
+ *   - Left, right, top, bottom planes are unchanged.
+ *   - Near plane: NDC z = col[2] (z/w >= 0 in clip space means in front of near plane).
+ *   - Far plane: skipped (infinite projection has no far clip).
+ */
+
+#version 460
+#extension GL_EXT_shader_atomic_int64 : enable  // not actually needed here, but harmless
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// ── Structures ─────────────────────────────────────────────────────────────────
+
+struct DrawIndirectCommand {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+// One entry per draw group: world-space axis-aligned bounding box.
+// Packed as two vec4s (w component is padding / reserved).
+struct GroupAABB {
+    vec4 min_xyz; // xyz = world AABB min
+    vec4 max_xyz; // xyz = world AABB max
+};
+
+// ── Descriptor set 0 ───────────────────────────────────────────────────────────
+
+// Binding 0: reference draw commands (CPU-uploaded when geometry changes; never modified by GPU).
+layout(set = 0, binding = 0) readonly buffer RefDrawBuffer {
+    DrawIndirectCommand ref_commands[];
+};
+
+// Binding 1: live draw commands (written each frame by this shader; read by vkCmdDrawIndirect).
+layout(set = 0, binding = 1) buffer DrawBuffer {
+    DrawIndirectCommand draw_commands[];
+};
+
+// Binding 2: per-group world-space AABBs (CPU-uploaded when geometry changes).
+layout(set = 0, binding = 2) readonly buffer AABBBuffer {
+    GroupAABB aabbs[];
+};
+
+// ── Push constants ─────────────────────────────────────────────────────────────
+
+layout(push_constant) uniform CullPushConstants {
+    mat4 view_proj;   // column-major VP matrix (same as used by the vertex shader)
+    uint group_count; // total number of draw groups
+};
+
+// ── Frustum test ───────────────────────────────────────────────────────────────
+
+// Returns true if the world-space AABB might be visible (not fully outside any frustum plane).
+// False negatives (false visible) are safe — they just waste GPU time drawing an off-screen mesh.
+// False positives (false invisible) would incorrectly cull visible geometry — algorithm must not produce these.
+bool is_aabb_visible(GroupAABB aabb)
+{
+    vec3 bmin = aabb.min_xyz.xyz;
+    vec3 bmax = aabb.max_xyz.xyz;
+
+    // Extract 5 frustum planes from the column-major VP matrix using Gribb-Hartmann.
+    // Column notation: view_proj[col][row].
+    // Plane equation: dot(plane.xyz, point) + plane.w >= 0 means inside.
+    mat4 m = view_proj;
+    vec4 planes[5];
+    planes[0] = vec4(m[0][3] + m[0][0], m[1][3] + m[1][0], m[2][3] + m[2][0], m[3][3] + m[3][0]); // left
+    planes[1] = vec4(m[0][3] - m[0][0], m[1][3] - m[1][0], m[2][3] - m[2][0], m[3][3] - m[3][0]); // right
+    planes[2] = vec4(m[0][3] + m[0][1], m[1][3] + m[1][1], m[2][3] + m[2][1], m[3][3] + m[3][1]); // bottom
+    planes[3] = vec4(m[0][3] - m[0][1], m[1][3] - m[1][1], m[2][3] - m[2][1], m[3][3] - m[3][1]); // top
+    // Near plane (reversed-Z: clip z = m * p's z component; z/w >= 0 is in front of near).
+    // For a reversed-Z infinite projection, near maps to z/w = 1 in NDC, but the clip-space
+    // near half-space is still z >= 0 before the perspective divide. col[2] gives this plane.
+    planes[4] = vec4(m[0][2], m[1][2], m[2][2], m[3][2]);
+
+    for (int i = 0; i < 5; ++i) {
+        vec3 n = planes[i].xyz;
+        float d = planes[i].w;
+
+        // P-vertex: the AABB corner that is most positive along the plane normal.
+        // If even this corner fails the plane test, the entire AABB is outside.
+        vec3 pv = vec3(
+            (n.x >= 0.0) ? bmax.x : bmin.x,
+            (n.y >= 0.0) ? bmax.y : bmin.y,
+            (n.z >= 0.0) ? bmax.z : bmin.z
+        );
+        if (dot(n, pv) + d < 0.0)
+            return false; // AABB is fully outside this plane — cull the group
+    }
+    return true;
+}
+
+// ── Main ───────────────────────────────────────────────────────────────────────
+
+void main()
+{
+    uint gi = gl_GlobalInvocationID.x;
+    if (gi >= group_count)
+        return;
+
+    DrawIndirectCommand cmd = ref_commands[gi];
+    if (!is_aabb_visible(aabbs[gi]))
+        cmd.instanceCount = 0;
+    draw_commands[gi] = cmd;
+}

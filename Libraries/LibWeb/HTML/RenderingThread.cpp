@@ -204,7 +204,7 @@ public:
 
                 if (m_cached_display_list && m_backing_stores.is_valid()) {
                     auto should_clear_back_store = presentation_mode.visit(
-                        [](RenderingThread::PresentToUI) { return false; },
+                        [](RenderingThread::PresentToUI const& mode) { return mode.clear_back_store; },
                         [](RenderingThread::PublishToExternalContent const&) { return true; });
                     if (should_clear_back_store) {
                         // Embedded navigables leave their PaintConfig canvas unfilled, so double-buffered back stores

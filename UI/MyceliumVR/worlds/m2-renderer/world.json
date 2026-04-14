@@ -1,0 +1,14 @@
+{
+  "format": "mycelium.world",
+  "version": 1,
+  "package": "m2-renderer",
+  "name": "Milestone 2 — PBR Materials (Damaged Helmet)",
+  "entry": {
+    "script": "scripts/main.js"
+  },
+  "permissions": {
+    "storage": false,
+    "network": false,
+    "wasm": false
+  }
+}

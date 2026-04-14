@@ -3117,13 +3117,17 @@ void Navigable::record_display_list_and_scroll_state(PaintConfig paint_config)
 void Navigable::paint_next_frame()
 {
     auto viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
+    if (is_top_level_traversable())
+        m_rendering_thread.set_presentation_mode(RenderingThread::PresentToUI { .clear_back_store = page().client().paints_transparent_top_level_canvas() });
+
     PaintConfig paint_config { .paint_overlay = true, .should_show_line_box_borders = m_should_show_line_box_borders };
-    if (is_top_level_traversable()) {
+    if (is_top_level_traversable() && !page().client().paints_transparent_top_level_canvas()) {
         paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_rect.size() };
     } else {
         // Nested navigables publish transparent bitmaps to their preconfigured ExternalContentSource instead of filling
         // the canvas for the UI process.
-        VERIFY(m_external_content_source);
+        if (!is_top_level_traversable())
+            VERIFY(m_external_content_source);
     }
 
     record_display_list_and_scroll_state(paint_config);

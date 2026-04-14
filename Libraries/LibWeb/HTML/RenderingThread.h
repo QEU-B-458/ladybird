@@ -27,6 +27,7 @@ class RenderingThread {
 public:
     using PresentationCallback = Function<void(Gfx::IntRect const&, i32)>;
     struct PresentToUI {
+        bool clear_back_store { false };
     };
     struct PublishToExternalContent {
         NonnullRefPtr<Painting::ExternalContentSource> source;

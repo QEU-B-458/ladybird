@@ -64,6 +64,7 @@ public:
     void set_preferred_color_scheme(Web::CSS::PreferredColorScheme);
     void set_preferred_contrast(Web::CSS::PreferredContrast);
     void set_preferred_motion(Web::CSS::PreferredMotion);
+    void set_paints_transparent_top_level_canvas(bool paints_transparent_top_level_canvas) { m_paints_transparent_top_level_canvas = paints_transparent_top_level_canvas; }
     void set_has_focus(bool);
     void set_is_scripting_enabled(bool);
     void set_window_position(Web::DevicePixelPoint);
@@ -119,6 +120,7 @@ private:
     virtual Web::CSS::PreferredColorScheme preferred_color_scheme() const override { return m_preferred_color_scheme; }
     virtual Web::CSS::PreferredContrast preferred_contrast() const override { return m_preferred_contrast; }
     virtual Web::CSS::PreferredMotion preferred_motion() const override { return m_preferred_motion; }
+    virtual bool paints_transparent_top_level_canvas() const override { return m_paints_transparent_top_level_canvas; }
     virtual void page_did_request_cursor_change(Gfx::Cursor const&) override;
     virtual void page_did_change_title(Utf16String const&) override;
     virtual void page_did_change_url(URL::URL const&) override;
@@ -217,6 +219,7 @@ private:
     Web::CSS::PreferredColorScheme m_preferred_color_scheme { Web::CSS::PreferredColorScheme::Auto };
     Web::CSS::PreferredContrast m_preferred_contrast { Web::CSS::PreferredContrast::NoPreference };
     Web::CSS::PreferredMotion m_preferred_motion { Web::CSS::PreferredMotion::NoPreference };
+    bool m_paints_transparent_top_level_canvas { false };
 
     Core::AnonymousBuffer m_document_cookie_version_buffer;
 
