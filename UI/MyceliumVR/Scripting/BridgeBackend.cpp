@@ -66,8 +66,8 @@ u32 BridgeBackend::commit_transform_buffer(ReadonlySpan<float> buffer, u32 count
     u32 applied_count = 0;
     for (size_t row_index = 0; row_index < rows_to_apply; ++row_index) {
         auto row = buffer.slice(row_index * transform_stride, transform_stride);
-        auto entity = static_cast<EntityId>(row[0]);
-        if (!m_world.entity(entity))
+        auto entity = static_cast<EntityId>(static_cast<u32>(row[0]));
+        if (!m_world.registry().valid(entity))
             continue;
 
         Transform transform;
@@ -111,23 +111,22 @@ bool BridgeBackend::create_panel(EntityId entity, String url, double width, doub
 
 Optional<EntityId> BridgeBackend::entity_id_at(u32 index) const
 {
-    u32 alive_index = 0;
-    for (auto const& entity : m_world.entities()) {
-        if (!entity.alive)
-            continue;
-        if (alive_index == index)
-            return entity.id;
-        ++alive_index;
+    u32 i = 0;
+    auto view = m_world.registry().view<Transform>();
+    for (auto entity : view) {
+        if (i == index)
+            return entity;
+        ++i;
     }
     return {};
 }
 
 Optional<Transform> BridgeBackend::transform_for_entity(EntityId entity) const
 {
-    auto const* existing_entity = m_world.entity(entity);
-    if (!existing_entity)
+    auto const* transform = m_world.registry().try_get<Transform>(entity);
+    if (!transform)
         return {};
-    return existing_entity->transform;
+    return *transform;
 }
 
 void BridgeBackend::set_camera(double px, double py, double pz, double yaw_degrees, double pitch_degrees)
@@ -180,7 +179,7 @@ void BridgeBackend::set_directional_light(double to_x, double to_y, double to_z,
 
 void BridgeBackend::set_point_light(int index, double x, double y, double z, double r, double g, double b, double intensity, double radius)
 {
-    if (!m_set_scene_light || index < 0 || index >= VulkanRenderer::SceneLightData::MaxPointLights)
+    if (!m_set_scene_light || index < 0 || index >= MaxPointLights)
         return;
     auto light = m_scene_light ? m_scene_light() : VulkanRenderer::SceneLightData {};
     auto& pl = light.point_lights[index];
@@ -199,7 +198,7 @@ void BridgeBackend::set_point_light(int index, double x, double y, double z, dou
 
 void BridgeBackend::set_spot_light(int index, double x, double y, double z, double dx, double dy, double dz, double inner_deg, double outer_deg, double r, double g, double b, double intensity, double radius)
 {
-    if (!m_set_scene_light || index < 0 || index >= VulkanRenderer::SceneLightData::MaxPointLights)
+    if (!m_set_scene_light || index < 0 || index >= MaxPointLights)
         return;
     auto light = m_scene_light ? m_scene_light() : VulkanRenderer::SceneLightData {};
     auto& pl = light.point_lights[index];

@@ -9,16 +9,17 @@ namespace MyceliumVR {
 
 Session::Session()
 {
+    m_active_world = make<World>();
     m_active_world_id = allocate_world_id();
     m_active_world_name = "default"_string;
 }
 
 World& Session::reset_active_world(String name)
 {
-    m_active_world = {};
+    m_active_world = make<World>();
     m_active_world_id = allocate_world_id();
     m_active_world_name = move(name);
-    return m_active_world;
+    return *m_active_world;
 }
 
 World& Session::begin_loading_world(String name)
@@ -41,7 +42,7 @@ bool Session::activate_loading_world()
     if (!m_loading_world)
         return false;
 
-    m_active_world = move(*m_loading_world);
+    m_active_world = move(m_loading_world);
     m_active_world_id = m_loading_world_id;
     m_active_world_name = move(m_loading_world_name);
     cancel_loading_world();

@@ -38,6 +38,7 @@ public:
     explicit MeshLibrary(VirtualFileSystem const* = nullptr, MaterialLibrary* = nullptr);
 
     ErrorOr<MeshAsset const*> resolve_mesh(String const& mesh_name);
+    MaterialLibrary const* material_library() const { return m_material_library; }
 
 private:
     ErrorOr<MeshAsset> load_mesh(String const& mesh_name);

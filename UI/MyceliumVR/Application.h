@@ -29,6 +29,12 @@ public:
         return m_script_path_argument;
     }
     StringView world_path() const { return m_world_path_argument; }
+    StringView shadow_quality() const
+    {
+        if (m_shadow_quality_argument.is_empty())
+            return "9"sv;
+        return m_shadow_quality_argument;
+    }
     StringView sdk_generation_target() const { return m_generate_sdk_argument; }
     StringView sdk_output_directory() const
     {
@@ -46,6 +52,7 @@ private:
         args_parser.add_option(m_vulkan_probe_argument, "Probe SDL3 Vulkan instance and surface support, then exit", "vulkan-probe", 0);
         args_parser.add_option(m_script_path_argument, "JavaScript runtime script to load", "script", 0, "path");
         args_parser.add_option(m_world_path_argument, "Loose folder world to mount by package name, e.g. world://example/", "world", 0, "path");
+        args_parser.add_option(m_shadow_quality_argument, "Shadow quality level from 0 to 9 (0 = off, 1 = 1x1, 2 = 3x3, 3 = 5x5, ...)", "shadow-quality", 0, "level");
         args_parser.add_option(m_generate_sdk_argument, "Generate SDK files and exit (all, typescript, javascript, wasm, json)", "generate-sdk", 0, "target");
         args_parser.add_option(m_sdk_output_argument, "Output directory for generated SDK files", "sdk-output", 0, "path");
     }
@@ -97,6 +104,7 @@ private:
     bool m_vulkan_probe_argument { false };
     StringView m_script_path_argument;
     StringView m_world_path_argument;
+    StringView m_shadow_quality_argument;
     StringView m_generate_sdk_argument;
     StringView m_sdk_output_argument;
 };

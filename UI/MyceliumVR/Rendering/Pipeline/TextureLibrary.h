@@ -7,11 +7,14 @@
 
 #include <AK/Error.h>
 #include <AK/HashMap.h>
+#include <AK/NonnullOwnPtr.h>
+#include <AK/Optional.h>
 #include <AK/Span.h>
 #include <AK/String.h>
 
 #if defined(USE_VULKAN)
 #    include <vulkan/vulkan.h>
+#    include <vk_mem_alloc.h>
 #endif
 
 namespace MyceliumVR {
@@ -26,18 +29,17 @@ public:
     struct Entry {
 #if defined(USE_VULKAN)
         VkImage image { VK_NULL_HANDLE };
-        VkDeviceMemory memory { VK_NULL_HANDLE };
+        VmaAllocation allocation { VK_NULL_HANDLE };
         VkImageView image_view { VK_NULL_HANDLE };
         VkSampler sampler { VK_NULL_HANDLE };
-        VkDescriptorPool descriptor_pool { VK_NULL_HANDLE };
-        VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
 #endif
         u32 width { 0 };
         u32 height { 0 };
     };
 
 #if defined(USE_VULKAN)
-    TextureLibrary(VkPhysicalDevice, VkDevice, VkCommandPool, VkQueue, VkDescriptorSetLayout);
+    TextureLibrary(VkPhysicalDevice, VkDevice, u32 graphics_queue_family, VkQueue, VmaAllocator);
+    ~TextureLibrary();
 
     // Resolve a virtual path to a cached texture entry.
     // Returns nullptr if the path is not an image or load fails; caller should fall back to default.
@@ -57,10 +59,10 @@ private:
 
     VkPhysicalDevice m_physical_device { VK_NULL_HANDLE };
     VkDevice m_device { VK_NULL_HANDLE };
-    VkCommandPool m_command_pool { VK_NULL_HANDLE };
     VkQueue m_queue { VK_NULL_HANDLE };
-    VkDescriptorSetLayout m_descriptor_set_layout { VK_NULL_HANDLE };
-    HashMap<String, Entry> m_cache;
+    VmaAllocator m_allocator { VK_NULL_HANDLE };
+    VkCommandPool m_transient_pool { VK_NULL_HANDLE };
+    HashMap<String, NonnullOwnPtr<Entry>> m_cache;
 #endif
 };
 

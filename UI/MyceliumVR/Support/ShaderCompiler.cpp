@@ -9,6 +9,9 @@
 
 #include <AK/ByteString.h>
 #include <AK/Format.h>
+#include <AK/HashTable.h>
+#include <AK/ScopeGuard.h>
+#include <AK/StringView.h>
 #include <AK/StringBuilder.h>
 #include <LibCrypto/Hash/SHA2.h>
 
@@ -53,6 +56,80 @@ static String shader_cache_path(StringView cache_root, ShaderCompileRequest cons
         shader_stage_name(request.stage),
         MUST(String::formatted("{}", digest))));
     return MUST(String::formatted("{}{}", cache_root, filename));
+}
+
+static String shader_base_path(StringView source_name)
+{
+    auto last_slash = source_name.find_last('/');
+    if (!last_slash.has_value())
+        return MUST(String::from_utf8(""sv));
+    return MUST(String::from_utf8(source_name.substring_view(0, *last_slash + 1).bytes()));
+}
+
+static String resolve_include_path(StringView including_source_name, StringView include_name)
+{
+    auto base_path = shader_base_path(including_source_name);
+    return MUST(String::formatted("{}{}", base_path, include_name));
+}
+
+static ErrorOr<void> append_expanded_shader_source(
+    VirtualFileSystem const& file_system,
+    StringBuilder& output,
+    StringView source_name,
+    StringView source,
+    HashTable<String>& include_stack)
+{
+    auto normalized_source_name = TRY(String::from_utf8(source_name.bytes()));
+    if (include_stack.contains(normalized_source_name))
+        return Error::from_string_literal("Recursive GLSL #include detected");
+
+    include_stack.set(normalized_source_name);
+    ScopeGuard pop_include = [&] {
+        include_stack.remove(normalized_source_name);
+    };
+
+    output.appendff("// BEGIN {}\n", normalized_source_name);
+
+    size_t line_start = 0;
+    while (line_start < source.length()) {
+        auto line_end = source.substring_view(line_start).find('\n').value_or(source.length() - line_start) + line_start;
+        auto line = source.substring_view(line_start, line_end - line_start);
+        auto trimmed = line.trim_whitespace();
+
+        if (trimmed.starts_with("#include "sv)) {
+            auto include_spec = trimmed.substring_view(9).trim_whitespace();
+            if (include_spec.length() < 2 || include_spec[0] != '"' || include_spec[include_spec.length() - 1] != '"')
+                return Error::from_string_literal("GLSL #include must use quoted relative paths");
+
+            auto include_name = include_spec.substring_view(1, include_spec.length() - 2);
+            auto include_path = resolve_include_path(source_name, include_name);
+            auto include_bytes = TRY(file_system.read_file(include_path));
+            auto include_source = TRY(String::from_utf8(StringView { include_bytes }));
+
+            TRY(append_expanded_shader_source(
+                file_system,
+                output,
+                include_path,
+                include_source,
+                include_stack));
+        } else {
+            output.append(line);
+            output.append('\n');
+        }
+
+        line_start = line_end + 1;
+    }
+
+    output.appendff("// END {}\n", normalized_source_name);
+    return {};
+}
+
+static ErrorOr<String> preprocess_glsl_includes(VirtualFileSystem const& file_system, ShaderCompileRequest const& request)
+{
+    HashTable<String> include_stack;
+    StringBuilder builder;
+    TRY(append_expanded_shader_source(file_system, builder, request.source_name, request.source, include_stack));
+    return builder.to_string();
 }
 
 ShaderCompiler::ShaderCompiler(ShaderCompilerBackend backend)
@@ -132,11 +209,15 @@ ErrorOr<ShaderBytecode> ShaderCompiler::compile_glsl_to_spirv(ShaderCompileReque
 
 ErrorOr<ShaderBytecode> ShaderCompiler::load_or_compile_glsl_to_spirv(VirtualFileSystem& file_system, ShaderCompileRequest const& request, StringView cache_root) const
 {
-    auto cached_shader_path = shader_cache_path(cache_root, request, m_backend);
+    auto expanded_source = TRY(preprocess_glsl_includes(file_system, request));
+    ShaderCompileRequest expanded_request = request;
+    expanded_request.source = expanded_source;
+
+    auto cached_shader_path = shader_cache_path(cache_root, expanded_request, m_backend);
     if (file_system.exists(cached_shader_path))
         return load_spirv(file_system, cached_shader_path);
 
-    auto bytecode = TRY(compile_glsl_to_spirv(request));
+    auto bytecode = TRY(compile_glsl_to_spirv(expanded_request));
     auto serialized = TRY(serialize_spirv(bytecode));
     TRY(file_system.write_file(cached_shader_path, serialized.bytes()));
     bytecode.source_path = move(cached_shader_path);

@@ -1,0 +1,100 @@
+#version 450
+
+layout(local_size_x = 64) in;
+
+struct GPUPointLight {
+    vec4 position_radius; // xyz=world pos, w=radius
+    vec4 color_intensity;
+    vec4 spot_direction;
+    vec4 spot_cone;
+};
+
+layout(push_constant) uniform PC {
+    mat4  view;     // world → view transform
+    float near;
+    float far;
+    uint  n_lights;
+    float proj_x;   // fl / aspect_ratio  (positive)
+    float proj_y;   // -fl                (negative)
+} pc;
+
+layout(std430, set = 0, binding = 0) readonly buffer PointLights {
+    GPUPointLight lights[];
+} point_lights;
+
+layout(std430, set = 0, binding = 1) writeonly buffer ClusterCount {
+    uint data[];
+} cluster_count;
+
+layout(std430, set = 0, binding = 2) writeonly buffer ClusterIndex {
+    uint data[];
+} cluster_index;
+
+#define CLUSTER_GRID_X        16
+#define CLUSTER_GRID_Y         9
+#define CLUSTER_GRID_Z        24
+#define CLUSTER_TOTAL       3456
+#define MAX_LIGHTS_PER_CLUSTER 32
+
+void main()
+{
+    uint cluster_idx = gl_GlobalInvocationID.x;
+    if (cluster_idx >= CLUSTER_TOTAL)
+        return;
+
+    uint iz        = cluster_idx / (CLUSTER_GRID_X * CLUSTER_GRID_Y);
+    uint remaining = cluster_idx % (CLUSTER_GRID_X * CLUSTER_GRID_Y);
+    uint iy        = remaining / CLUSTER_GRID_X;
+    uint ix        = remaining % CLUSTER_GRID_X;
+
+    // NDC tile extent for this cluster
+    float ndc_x0 = float(ix)     / float(CLUSTER_GRID_X) * 2.0 - 1.0;
+    float ndc_x1 = float(ix + 1) / float(CLUSTER_GRID_X) * 2.0 - 1.0;
+    float ndc_y0 = float(iy)     / float(CLUSTER_GRID_Y) * 2.0 - 1.0;
+    float ndc_y1 = float(iy + 1) / float(CLUSTER_GRID_Y) * 2.0 - 1.0;
+
+    // Depth slice boundaries (positive view-space distances from camera)
+    // Exponential distribution: d = near * (far/near)^(iz / NZ)
+    float log_ratio = log(pc.far / pc.near);
+    float d0 = pc.near * exp(float(iz)     / float(CLUSTER_GRID_Z) * log_ratio);
+    float d1 = pc.near * exp(float(iz + 1) / float(CLUSTER_GRID_Z) * log_ratio);
+
+    // Compute AABB of the cluster frustum tile in view space.
+    // view_x = ndc_x * depth / proj_x
+    // view_y = ndc_y * depth / proj_y  (proj_y is negative, so sign is correct)
+    // view_z = -depth                  (camera looks down -Z)
+    vec3 c[8];
+    c[0] = vec3(ndc_x0 * d0 / pc.proj_x, ndc_y0 * d0 / pc.proj_y, -d0);
+    c[1] = vec3(ndc_x1 * d0 / pc.proj_x, ndc_y0 * d0 / pc.proj_y, -d0);
+    c[2] = vec3(ndc_x0 * d0 / pc.proj_x, ndc_y1 * d0 / pc.proj_y, -d0);
+    c[3] = vec3(ndc_x1 * d0 / pc.proj_x, ndc_y1 * d0 / pc.proj_y, -d0);
+    c[4] = vec3(ndc_x0 * d1 / pc.proj_x, ndc_y0 * d1 / pc.proj_y, -d1);
+    c[5] = vec3(ndc_x1 * d1 / pc.proj_x, ndc_y0 * d1 / pc.proj_y, -d1);
+    c[6] = vec3(ndc_x0 * d1 / pc.proj_x, ndc_y1 * d1 / pc.proj_y, -d1);
+    c[7] = vec3(ndc_x1 * d1 / pc.proj_x, ndc_y1 * d1 / pc.proj_y, -d1);
+
+    vec3 aabb_min = c[0], aabb_max = c[0];
+    for (int i = 1; i < 8; ++i) {
+        aabb_min = min(aabb_min, c[i]);
+        aabb_max = max(aabb_max, c[i]);
+    }
+
+    // Test each point light's sphere against the cluster AABB
+    uint count = 0;
+    for (uint li = 0; li < pc.n_lights && count < MAX_LIGHTS_PER_CLUSTER; ++li) {
+        vec3  world_pos = point_lights.lights[li].position_radius.xyz;
+        float radius    = point_lights.lights[li].position_radius.w;
+
+        // Transform light centre to view space
+        vec3 view_pos = (pc.view * vec4(world_pos, 1.0)).xyz;
+
+        // Closest point on AABB to sphere centre
+        vec3 closest  = clamp(view_pos, aabb_min, aabb_max);
+        vec3 diff     = closest - view_pos;
+        if (dot(diff, diff) <= radius * radius) {
+            cluster_index.data[cluster_idx * MAX_LIGHTS_PER_CLUSTER + count] = li;
+            ++count;
+        }
+    }
+    cluster_count.data[cluster_idx] = count;
+}

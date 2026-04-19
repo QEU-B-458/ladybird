@@ -21,8 +21,8 @@ public:
     WorldId active_world_id() const { return m_active_world_id; }
     String const& active_world_name() const { return m_active_world_name; }
 
-    World& active_world() { return m_active_world; }
-    World const& active_world() const { return m_active_world; }
+    World& active_world() { return *m_active_world; }
+    World const& active_world() const { return *m_active_world; }
 
     World& reset_active_world(String name);
 
@@ -40,7 +40,7 @@ private:
     WorldId m_next_world_id { 1 };
     WorldId m_active_world_id { 0 };
     String m_active_world_name;
-    World m_active_world;
+    OwnPtr<World> m_active_world;
 
     WorldId m_loading_world_id { 0 };
     String m_loading_world_name;

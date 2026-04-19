@@ -10,14 +10,15 @@ layout(location = 1) in vec3 in_normal;
 layout(location = 2) in vec3 in_color;
 layout(location = 3) in vec2 in_uv;
 
-// Binding 1: per-instance model matrix (four vec4 columns, column-major).
+// Binding 1: per-instance data (mat4 model + u32 material_index)
 layout(location = 4) in vec4 in_model_col0;
 layout(location = 5) in vec4 in_model_col1;
 layout(location = 6) in vec4 in_model_col2;
 layout(location = 7) in vec4 in_model_col3;
+layout(location = 8) in uint in_material_index;
 
-// Tangent (xyz = tangent direction, w = bitangent sign; all zero = no tangent data).
-layout(location = 8) in vec4 in_tangent;
+// Tangent (xyz = tangent direction, w = bitangent sign).
+layout(location = 9) in vec4 in_tangent;
 
 layout(location = 0) out vec3 v_normal;
 layout(location = 1) out vec3 v_color;
@@ -25,10 +26,12 @@ layout(location = 2) out vec2 v_uv;
 layout(location = 3) out vec3 v_world_pos;
 layout(location = 4) out vec3 v_tangent;
 layout(location = 5) out vec3 v_bitangent;
+layout(location = 6) flat out uint v_material_index;
 
 void main()
 {
     mat4 model = mat4(in_model_col0, in_model_col1, in_model_col2, in_model_col3);
+    v_material_index = in_material_index;
     vec4 world_pos4 = model * vec4(in_position, 1.0);
     gl_Position = pc.view_projection * world_pos4;
     v_world_pos = world_pos4.xyz;

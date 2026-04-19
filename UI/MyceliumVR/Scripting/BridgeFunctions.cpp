@@ -338,9 +338,10 @@ static void mat4_decompose_trs(float const m[16],
 
 static JS::ThrowCompletionOr<EntityId> validated_entity(JS::VM& vm, BridgeBackend& backend, size_t arg_index, StringView op)
 {
-    auto entity = TRY(vm.argument(arg_index).to_u32(vm));
-    if (!backend.world().entity(entity))
-        return vm.throw_completion<JS::RangeError>(MUST(String::formatted("mycelium.{}: invalid EntityId {}", op, entity)));
+    auto entity_val = TRY(vm.argument(arg_index).to_u32(vm));
+    auto entity = static_cast<EntityId>(entity_val);
+    if (!backend.world().registry().valid(entity))
+        return vm.throw_completion<JS::RangeError>(MUST(String::formatted("mycelium.{}: invalid EntityId {}", op, entity_val)));
     return entity;
 }
 
@@ -378,11 +379,11 @@ void bind_all(
 
     // -- World --
     reg(mycelium, [&runtime](JS::VM&) -> JS::ThrowCompletionOr<JS::Value> {
-        return JS::Value(runtime.bridge_backend().spawn_entity());
+        return JS::Value(static_cast<u32>(runtime.bridge_backend().spawn_entity()));
     }, 0); // spawnEntity
 
     reg(mycelium, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
-        auto entity = TRY(vm.argument(0).to_u32(vm));
+        auto entity = static_cast<EntityId>(TRY(vm.argument(0).to_u32(vm)));
         return JS::Value(runtime.bridge_backend().destroy_entity(entity));
     }, 1); // destroyEntity
 
@@ -391,7 +392,7 @@ void bind_all(
         auto entity_id = runtime.bridge_backend().entity_id_at(index);
         if (!entity_id.has_value())
             return JS::js_null();
-        return JS::Value(*entity_id);
+        return JS::Value(static_cast<u32>(*entity_id));
     }, 1); // entityIdAt
 
     // -- Transform --
@@ -493,7 +494,7 @@ void bind_all(
             mat4_decompose_trs(node.world_matrix, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
             runtime.bridge_backend().set_transform(entity, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 
-            TRY(array->create_data_property_or_throw(arr_index, JS::Value(entity)));
+            TRY(array->create_data_property_or_throw(arr_index, JS::Value(static_cast<u32>(entity))));
             ++arr_index;
         }
 

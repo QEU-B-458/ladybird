@@ -7,6 +7,10 @@
 
 #include "BridgeFunctions.h"
 
+#if defined(TRACY_ENABLE)
+#    include <tracy/Tracy.hpp>
+#endif
+
 #include <AK/Format.h>
 #include <LibCore/File.h>
 #include <LibJS/Bytecode/Interpreter.h>
@@ -172,6 +176,9 @@ ErrorOr<void> ScriptRuntime::load_script_source(ByteBuffer source, StringView fi
 
 void ScriptRuntime::update(double delta_time)
 {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Simulation/ScriptUpdate");
+#endif
     if (m_loaded_scripts.is_empty())
         return;
 

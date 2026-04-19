@@ -43,6 +43,18 @@ VulkanRenderer::SceneLightData Renderer::scene_light() const
     return m_vulkan_renderer->scene_light();
 }
 
+void Renderer::set_shadow_quality(VulkanRenderer::ShadowQuality shadow_quality)
+{
+    VERIFY(m_vulkan_renderer);
+    m_vulkan_renderer->set_shadow_quality(shadow_quality);
+}
+
+VulkanRenderer::ShadowQuality Renderer::shadow_quality() const
+{
+    VERIFY(m_vulkan_renderer);
+    return m_vulkan_renderer->shadow_quality();
+}
+
 void Renderer::set_panel_bitmap(Vector<u8> pixels, u32 width, u32 height)
 {
     if (m_vulkan_renderer)

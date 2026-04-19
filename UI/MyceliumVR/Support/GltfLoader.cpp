@@ -5,6 +5,10 @@
 
 #include "GltfLoader.h"
 
+#if defined(TRACY_ENABLE)
+#    include <tracy/Tracy.hpp>
+#endif
+
 #include "VirtualFileSystem.h"
 
 #include <AK/ByteString.h>
@@ -307,6 +311,10 @@ GltfLoader::GltfLoader(VirtualFileSystem const& file_system)
 
 ErrorOr<GltfSceneAsset> GltfLoader::load_scene(StringView virtual_path) const
 {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Asset/GltfLoad");
+    ZoneText(virtual_path.characters_without_null_termination(), virtual_path.length());
+#endif
     auto source = TRY(m_file_system.read_file(virtual_path));
 
     tg3_model model {};
@@ -332,14 +340,20 @@ ErrorOr<GltfSceneAsset> GltfLoader::load_scene(StringView virtual_path) const
     if (auto slash = virtual_path.find_last('/'); slash.has_value())
         base_dir = virtual_path.substring_view(0, *slash);
 
-    auto parse_result = tg3_parse_auto(
-        &model,
-        &errors,
-        reinterpret_cast<uint8_t const*>(source.data()),
-        source.size(),
-        base_dir.is_empty() ? nullptr : base_dir.characters_without_null_termination(),
-        static_cast<uint32_t>(base_dir.length()),
-        &options);
+    int parse_result;
+    {
+#if defined(TRACY_ENABLE)
+        ZoneScopedN("Asset/GltfParse");
+#endif
+        parse_result = tg3_parse_auto(
+            &model,
+            &errors,
+            reinterpret_cast<uint8_t const*>(source.data()),
+            source.size(),
+            base_dir.is_empty() ? nullptr : base_dir.characters_without_null_termination(),
+            static_cast<uint32_t>(base_dir.length()),
+            &options);
+    }
 
     if (parse_result != TG3_OK) {
         tg3_error_stack_free(&errors);
@@ -438,6 +452,8 @@ ErrorOr<GltfSceneAsset> GltfLoader::load_scene(StringView virtual_path) const
             material_asset.alpha_mode = GltfMaterialAsset::AlphaMode::Blend;
         else
             material_asset.alpha_mode = GltfMaterialAsset::AlphaMode::Opaque;
+
+        material_asset.cull_mode = mat.double_sided ? GltfMaterialAsset::CullMode::Disabled : GltfMaterialAsset::CullMode::Back;
 
         scene.materials.append(move(material_asset));
     }

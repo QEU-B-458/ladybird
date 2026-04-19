@@ -9,6 +9,10 @@
 #include <LibGfx/SharedImageBuffer.h>
 #include <LibWeb/UIEvents/MouseButton.h>
 
+#if defined(TRACY_ENABLE)
+#    include <tracy/Tracy.hpp>
+#endif
+
 namespace MyceliumVR {
 
 static constexpr bool debug_web_content_paint = false;
@@ -133,11 +137,18 @@ WebContentView::~WebContentView() { }
 
 bool WebContentView::needs_paint() const
 {
+#if defined(TRACY_ENABLE)
+    TracyPlot("WebContent/NeedsPaint", static_cast<int64_t>(m_needs_paint ? 1 : 0));
+    TracyPlot("WebContent/HasUsableBitmap", static_cast<int64_t>(m_client_state.has_usable_bitmap ? 1 : 0));
+#endif
     return m_needs_paint || !m_client_state.has_usable_bitmap;
 }
 
 ErrorOr<Optional<WebContentBitmapView>> WebContentView::snapshot_bitmap_view()
 {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Boundary/Ladybird/SnapshotBitmapView");
+#endif
     Gfx::Bitmap const* bitmap = nullptr;
     Web::DevicePixelSize bitmap_size;
 
@@ -160,13 +171,23 @@ ErrorOr<Optional<WebContentBitmapView>> WebContentView::snapshot_bitmap_view()
         .visible_height = static_cast<int>(bitmap_size.height()),
         .bitmap = bitmap,
     };
+#if defined(TRACY_ENABLE)
+    TracyPlot("WebContent/SnapshotWidth", static_cast<int64_t>(snapshot.width));
+    TracyPlot("WebContent/SnapshotHeight", static_cast<int64_t>(snapshot.height));
+    TracyPlot("WebContent/SnapshotVisibleWidth", static_cast<int64_t>(snapshot.visible_width));
+    TracyPlot("WebContent/SnapshotVisibleHeight", static_cast<int64_t>(snapshot.visible_height));
+    TracyPlot("WebContent/SnapshotBytes", static_cast<int64_t>(snapshot.width) * snapshot.height * 4);
+#endif
     m_needs_paint = false;
     return snapshot;
 }
 
 ErrorOr<Optional<WebContentBitmapView>> WebContentView::snapshot_bitmap_view_for_current_viewport()
 {
-    if (!m_client_state.has_usable_bitmap)
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Boundary/Ladybird/SnapshotBitmapViewport");
+#endif
+    if (!m_client_state.has_usable_bitmap || !m_needs_paint)
         return Optional<WebContentBitmapView> {};
 
     VERIFY(m_client_state.front_bitmap.shared_image_buffer);
@@ -188,6 +209,11 @@ ErrorOr<Optional<WebContentBitmapView>> WebContentView::snapshot_bitmap_view_for
         .visible_height = static_cast<int>(bitmap_size.height()),
         .bitmap = bitmap,
     };
+#if defined(TRACY_ENABLE)
+    TracyPlot("WebContent/ViewportSnapshotWidth", static_cast<int64_t>(snapshot.width));
+    TracyPlot("WebContent/ViewportSnapshotHeight", static_cast<int64_t>(snapshot.height));
+    TracyPlot("WebContent/ViewportSnapshotBytes", static_cast<int64_t>(snapshot.width) * snapshot.height * 4);
+#endif
     m_needs_paint = false;
     return snapshot;
 }
@@ -271,6 +297,11 @@ ErrorOr<Optional<WebContentBitmapSnapshot>> WebContentView::snapshot_bitmap_for_
 
 void WebContentView::resize(int width, int height)
 {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Boundary/Ladybird/WebContentResize");
+    TracyPlot("WebContent/ResizeWidth", static_cast<int64_t>(width));
+    TracyPlot("WebContent/ResizeHeight", static_cast<int64_t>(height));
+#endif
     m_width = width;
     m_height = height;
     m_needs_paint = true;

@@ -31,6 +31,8 @@ public:
     VulkanRenderer::CameraState camera_state() const { return m_renderer.camera_state(); }
     void set_scene_light(VulkanRenderer::SceneLightData const& light) { m_renderer.set_scene_light(light); }
     VulkanRenderer::SceneLightData scene_light() const { return m_renderer.scene_light(); }
+    void set_shadow_quality(VulkanRenderer::ShadowQuality shadow_quality) { m_renderer.set_shadow_quality(shadow_quality); }
+    VulkanRenderer::ShadowQuality shadow_quality() const { return m_renderer.shadow_quality(); }
 
     void resize(int width, int height);
     ErrorOr<void> render();

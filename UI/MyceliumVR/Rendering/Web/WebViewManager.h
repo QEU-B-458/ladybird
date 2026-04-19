@@ -7,7 +7,7 @@
 
 #include "WebContentView.h"
 
-#include "../World/World.h"
+#include "../../World/World.h"
 
 #include <AK/Error.h>
 #include <AK/HashMap.h>
@@ -42,7 +42,7 @@ private:
     void choose_active_panel(World const&);
 
     HashMap<EntityId, ManagedView> m_views;
-    EntityId m_active_panel { 0 };
+    EntityId m_active_panel { entt::null };
 };
 
 }

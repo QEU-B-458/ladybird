@@ -7,6 +7,10 @@
 
 #include <LibCore/File.h>
 
+#if defined(TRACY_ENABLE)
+#    include <tracy/Tracy.hpp>
+#endif
+
 namespace MyceliumVR {
 
 OverlayManager::OverlayManager() = default;
@@ -75,6 +79,9 @@ bool OverlayManager::should_route_input(SDL_Event const& event) const
 
 ErrorOr<Optional<WebContentBitmapView>> OverlayManager::snapshot_overlay_view()
 {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Boundary/Ladybird/OverlaySnapshot");
+#endif
     if (!m_view || !m_visible)
         return Optional<WebContentBitmapView> {};
 
@@ -82,6 +89,12 @@ ErrorOr<Optional<WebContentBitmapView>> OverlayManager::snapshot_overlay_view()
     if (!snapshot.has_value())
         return Optional<WebContentBitmapView> {};
 
+#if defined(TRACY_ENABLE)
+    auto bytes = static_cast<int64_t>(snapshot->width) * snapshot->height * 4;
+    TracyPlot("Overlay/SnapshotWidth", static_cast<int64_t>(snapshot->width));
+    TracyPlot("Overlay/SnapshotHeight", static_cast<int64_t>(snapshot->height));
+    TracyPlot("Overlay/SnapshotBytes", bytes);
+#endif
     return snapshot;
 }
 

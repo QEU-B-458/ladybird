@@ -9,10 +9,12 @@
 #include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibGfx/Color.h>
+#include <entt/entt.hpp>
+#include <entt/meta/meta.hpp>
 
 namespace MyceliumVR {
 
-using EntityId = u32;
+using EntityId = entt::entity;
 
 struct Transform {
     float position[3] { 0.0f, 0.0f, 0.0f };
@@ -34,36 +36,49 @@ struct Panel {
     bool dirty { true };
 };
 
-struct Entity {
-    EntityId id { 0 };
-    Transform transform;
-    MeshRenderer mesh_renderer;
-    Optional<Panel> panel;
-    bool alive { true };
-    bool transform_dirty { true };
+// Cull mode override for a single entity.
+// Absence of this component means "inherit from the material" (default).
+struct CullOverride {
+    enum class Mode : u8 {
+        Back,     // force back-face culling regardless of material doubleSided
+        Front,    // force front-face culling (e.g. interior geometry, outline passes)
+        Disabled, // force double-sided / no culling
+    };
+    Mode mode { Mode::Back };
 };
+
+// Tag components for EnTT
+struct TransformDirty {};
+struct Selected {};
+struct Static {};
+struct AlphaBlend {};
+struct AlphaClip {};
+struct AlphaHash {};
 
 class World {
 public:
-    World() = default;
-    World(World&&) = default;
-    World& operator=(World&&) = default;
+    static void register_meta();
+
+    World();
+    World(World&&) = delete;
+    World& operator=(World&&) = delete;
     World(World const&) = delete;
     World& operator=(World const&) = delete;
 
     EntityId spawn_entity();
     bool destroy_entity(EntityId);
 
-    Entity* entity(EntityId);
-    Entity const* entity(EntityId) const;
-
     bool set_transform(EntityId, Transform const&);
     bool set_mesh(EntityId, String);
     bool set_material(EntityId, String);
     bool set_normal_map(EntityId, String);
+    bool set_cull_override(EntityId, CullOverride);
+    bool clear_cull_override(EntityId);
     bool create_panel(EntityId, String url, float width, float height);
 
-    Vector<Entity> const& entities() const { return m_entities; }
+    entt::registry& registry() { return m_registry; }
+    entt::registry const& registry() const { return m_registry; }
+
     size_t alive_entity_count() const;
     size_t dirty_transform_count() const;
     // layout_dirty: mesh/entity structure changed → full vertex buffer rebuild required.
@@ -73,9 +88,10 @@ public:
     void clear_dirty_flags();
 
 private:
-    EntityId m_next_entity_id { 1 };
-    Vector<Entity> m_entities;
-    HashMap<EntityId, size_t> m_entity_indices;
+    void on_transform_changed(entt::registry&, entt::entity);
+    void on_layout_changed(entt::registry&, entt::entity);
+
+    entt::registry m_registry;
     bool m_layout_dirty { true };    // spawn/destroy/set_mesh/set_material/set_normal_map/create_panel
     bool m_transform_dirty { true }; // set_transform (also set whenever layout_dirty is set)
 };

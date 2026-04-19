@@ -2,6 +2,10 @@
 
 layout(set = 0, binding = 0) uniform sampler2D panel_texture;
 
+layout(push_constant) uniform PushConstants {
+    mat4 view_projection;
+} push_constants;
+
 layout(location = 0) in vec2 v_uv;
 
 layout(location = 0) out vec4 outColor;

@@ -41,6 +41,11 @@ struct GltfTextureSlot {
 };
 
 struct GltfMaterialAsset {
+    enum class CullMode {
+        Back,
+        Disabled,
+    };
+
     String name;
 
     GltfTextureSlot albedo_texture;
@@ -57,6 +62,7 @@ struct GltfMaterialAsset {
 
     enum class AlphaMode { Opaque, Clip, Blend };
     AlphaMode alpha_mode { AlphaMode::Opaque };
+    CullMode cull_mode { CullMode::Back };
 };
 
 // One entry per (node × primitive) in the glTF scene graph.

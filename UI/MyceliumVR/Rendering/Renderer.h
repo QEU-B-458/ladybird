@@ -6,7 +6,7 @@
 #pragma once
 
 #include "../World/World.h"
-#include "VulkanRenderer.h"
+#include "Backend/VulkanRenderer.h"
 
 #include <AK/OwnPtr.h>
 #include <AK/Vector.h>
@@ -24,6 +24,8 @@ public:
     VulkanRenderer::CameraState camera_state() const;
     void set_scene_light(VulkanRenderer::SceneLightData const&);
     VulkanRenderer::SceneLightData scene_light() const;
+    void set_shadow_quality(VulkanRenderer::ShadowQuality);
+    VulkanRenderer::ShadowQuality shadow_quality() const;
     void set_panel_bitmap_view(VulkanRenderer::BitmapView);
     void set_panel_bitmap(Vector<u8>, u32 width, u32 height);
     void clear_panel_bitmap();

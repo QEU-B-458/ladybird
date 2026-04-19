@@ -6,7 +6,7 @@
 #pragma once
 
 #include "../World/World.h"
-#include "../Rendering/VulkanRenderer.h"
+#include "../Rendering/Backend/VulkanRenderer.h"
 
 #include <AK/Function.h>
 #include <AK/Optional.h>

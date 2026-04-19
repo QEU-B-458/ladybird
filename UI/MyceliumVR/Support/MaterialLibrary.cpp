@@ -5,6 +5,8 @@
 
 #include "MaterialLibrary.h"
 
+#include <AK/StringHash.h>
+
 namespace MyceliumVR {
 
 static MaterialTextureSlot resolve_slot(GltfTextureSlot const& gltf_slot, StringView base_virtual_dir)
@@ -21,6 +23,8 @@ static MaterialTextureSlot resolve_slot(GltfTextureSlot const& gltf_slot, String
     } else {
         // Embedded texture: carry the raw bytes; the renderer will upload them directly.
         slot.data = gltf_slot.data;
+        auto hash = string_hash(reinterpret_cast<char const*>(slot.data.data()), slot.data.size());
+        slot.embedded_cache_key = MUST(String::formatted("embedded_{:08x}_{}", hash, slot.data.size()));
     }
     return slot;
 }
@@ -52,6 +56,11 @@ void MaterialLibrary::register_from_gltf(GltfSceneAsset const& scene, StringView
         case GltfMaterialAsset::AlphaMode::Clip:  asset.alpha_mode = MaterialAsset::AlphaMode::Clip;  break;
         case GltfMaterialAsset::AlphaMode::Blend: asset.alpha_mode = MaterialAsset::AlphaMode::Blend; break;
         default:                                  asset.alpha_mode = MaterialAsset::AlphaMode::Opaque; break;
+        }
+
+        switch (gltf_mat.cull_mode) {
+        case GltfMaterialAsset::CullMode::Disabled: asset.cull_mode = MaterialAsset::CullMode::Disabled; break;
+        default:                                    asset.cull_mode = MaterialAsset::CullMode::Back; break;
         }
 
         m_cache.set(gltf_mat.name, move(asset));

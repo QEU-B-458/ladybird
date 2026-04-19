@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "VulkanRenderer.h"
+#include "../Backend/VulkanRenderer.h"
 #include "WebContentView.h"
 
 #include <AK/Error.h>

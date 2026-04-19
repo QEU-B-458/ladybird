@@ -21,6 +21,8 @@ namespace MyceliumVR {
 struct MaterialTextureSlot {
     String path;
     Vector<u8> data;
+    String embedded_cache_key;
+    mutable Optional<u32> cached_bindless_index;
 
     bool is_set() const { return !path.is_empty() || !data.is_empty(); }
 };
@@ -28,6 +30,11 @@ struct MaterialTextureSlot {
 // Data-only PBR material description. No GPU state.
 // All texture slots are optional; unset slots should use renderer-side fallback textures.
 struct MaterialAsset {
+    enum class CullMode {
+        Back,
+        Disabled,
+    };
+
     MaterialTextureSlot albedo;
     MaterialTextureSlot metallic_roughness; // G = roughness, B = metallic (glTF packed)
     MaterialTextureSlot normal;
@@ -42,6 +49,7 @@ struct MaterialAsset {
 
     enum class AlphaMode { Opaque, Clip, Blend, Hash };
     AlphaMode alpha_mode { AlphaMode::Opaque };
+    CullMode cull_mode { CullMode::Back };
 };
 
 // Caches MaterialAsset by name. Populated by registering parsed glTF scenes.
