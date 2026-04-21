@@ -38,6 +38,11 @@ public:
         u32 height { 0 };
     };
 
+    struct PassTiming {
+        String name;
+        double gpu_ms { 0.0 };
+    };
+
     struct Impl;
 
     static ErrorOr<NonnullOwnPtr<VulkanRenderer>> create(SDL_Window&, VirtualFileSystem const* = nullptr);
@@ -52,12 +57,19 @@ public:
     void set_overlay_bitmap_view(BitmapView);
     void set_overlay_view(OverlayView);
     void clear_overlay_bitmap();
+    void set_external_overlay_image(VkImage image, u32 width, u32 height);
+    void clear_external_overlay();
     void set_camera_state(CameraState const&);
     CameraState camera_state() const;
     void set_scene_light(SceneLightData const&);
     SceneLightData scene_light() const;
     void set_shadow_quality(ShadowQuality);
     ShadowQuality shadow_quality() const;
+    bool supports_external_image_import() const;
+    VkDevice vulkan_device() const;
+    u32 last_frame_draw_calls() const;
+    u32 last_frame_triangle_count() const;
+    Vector<PassTiming> last_frame_timings() const;
 
 private:
     explicit VulkanRenderer(SDL_Window&, VirtualFileSystem const*);

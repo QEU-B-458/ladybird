@@ -5,9 +5,7 @@
 
 #include "DepthPrepass.h"
 
-#if defined(TRACY_ENABLE)
-#    include <tracy/Tracy.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 
 namespace MyceliumVR {
 

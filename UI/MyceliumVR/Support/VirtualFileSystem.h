@@ -46,10 +46,12 @@ class VirtualFileSystem {
 public:
     ErrorOr<void> mount(StringView prefix, NonnullOwnPtr<Mount>, MountPermissions = MountPermissions::ReadOnly);
     ErrorOr<void> mount_directory(StringView prefix, ByteString root_path, MountPermissions = MountPermissions::ReadOnly);
+    ErrorOr<void> unmount(StringView prefix);
 
     ErrorOr<ByteBuffer> read_file(StringView virtual_path) const;
     ErrorOr<void> write_file(StringView virtual_path, ReadonlyBytes);
     bool exists(StringView virtual_path) const;
+    Vector<String> mount_prefixes() const;
 
 private:
     struct ResolvedPath {

@@ -77,7 +77,61 @@ static ErrorOr<VkPhysicalDevice> pick_physical_device(VkInstance instance, VkSur
     return Error::from_string_literal("No Vulkan device has a graphics queue that can present to the SDL surface");
 }
 
-static ErrorOr<VkDevice> create_logical_device(VkPhysicalDevice physical_device, u32 graphics_queue_family, bool& supports_multi_draw_indirect)
+// Returns true only when both VK_KHR_external_memory_fd is present AND the driver
+// reports that VK_FORMAT_B8G8R8A8_UNORM images can be exported/imported via opaque fd.
+// Both must hold for the zero-copy overlay path to be safe to enable.
+static bool check_external_memory_fd_support(VkPhysicalDevice physical_device)
+{
+    u32 ext_count = 0;
+    vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &ext_count, nullptr);
+    Vector<VkExtensionProperties> exts;
+    exts.resize(ext_count);
+    vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &ext_count, exts.data());
+
+    bool has_fd_ext = false;
+    for (auto const& ext : exts) {
+        if (StringView { ext.extensionName, strlen(ext.extensionName) } == VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) {
+            has_fd_ext = true;
+            break;
+        }
+    }
+    if (!has_fd_ext)
+        return false;
+
+    VkPhysicalDeviceExternalImageFormatInfo ext_fmt_info {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
+        .pNext = nullptr,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+    };
+    VkPhysicalDeviceImageFormatInfo2 fmt_info {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+        .pNext = &ext_fmt_info,
+        .format = VK_FORMAT_B8G8R8A8_UNORM,
+        .type = VK_IMAGE_TYPE_2D,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .flags = 0,
+    };
+    VkExternalImageFormatProperties ext_props {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
+        .pNext = nullptr,
+        .externalMemoryProperties = {},
+    };
+    VkImageFormatProperties2 fmt_props {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+        .pNext = &ext_props,
+        .imageFormatProperties = {},
+    };
+
+    if (vkGetPhysicalDeviceImageFormatProperties2(physical_device, &fmt_info, &fmt_props) != VK_SUCCESS)
+        return false;
+
+    auto features = ext_props.externalMemoryProperties.externalMemoryFeatures;
+    return (features & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) != 0
+        && (features & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
+}
+
+static ErrorOr<VkDevice> create_logical_device(VkPhysicalDevice physical_device, u32 graphics_queue_family, bool& supports_multi_draw_indirect, bool enable_external_memory_fd)
 {
     float queue_priority = 1.0f;
     VkDeviceQueueCreateInfo queue_create_info {
@@ -139,7 +193,11 @@ static ErrorOr<VkDevice> create_logical_device(VkPhysicalDevice physical_device,
         supports_multi_draw_indirect = false;
     }
 
-    Array<char const*, 1> device_extensions { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    Vector<char const*> device_extensions;
+    device_extensions.append(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    if (enable_external_memory_fd)
+        device_extensions.append(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+
     VkDeviceCreateInfo device_create_info {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &indexing_features,
@@ -148,7 +206,7 @@ static ErrorOr<VkDevice> create_logical_device(VkPhysicalDevice physical_device,
         .pQueueCreateInfos = &queue_create_info,
         .enabledLayerCount = 0,
         .ppEnabledLayerNames = nullptr,
-        .enabledExtensionCount = device_extensions.size(),
+        .enabledExtensionCount = static_cast<u32>(device_extensions.size()),
         .ppEnabledExtensionNames = device_extensions.data(),
         .pEnabledFeatures = &enabled_features
     };
@@ -230,8 +288,17 @@ ErrorOr<void> VulkanContext::initialize(SDL_Window& window)
     }
 
     m_physical_device = TRY(pick_physical_device(m_instance, m_surface, m_graphics_queue_family));
-    m_device = TRY(create_logical_device(m_physical_device, m_graphics_queue_family, m_supports_multi_draw_indirect));
+    m_supports_external_image_import = check_external_memory_fd_support(m_physical_device);
+    if (m_supports_external_image_import)
+        outln("VulkanContext: VK_KHR_external_memory_fd supported — zero-copy overlay path available.");
+    else
+        outln("VulkanContext: VK_KHR_external_memory_fd not available — overlay will use CPU bitmap path.");
+    m_device = TRY(create_logical_device(m_physical_device, m_graphics_queue_family, m_supports_multi_draw_indirect, m_supports_external_image_import));
     vkGetDeviceQueue(m_device, m_graphics_queue_family, 0, &m_graphics_queue);
+
+    VkPhysicalDeviceProperties device_props {};
+    vkGetPhysicalDeviceProperties(m_physical_device, &device_props);
+    m_timestamp_period = device_props.limits.timestampPeriod;
 
     // Load device-level debug proc addresses (naming + labels).
     VulkanDebug::init_device_procs(m_instance);

@@ -1,5 +1,6 @@
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Color.h>
+#include <LibIPC/File.h>
 #include <LibIPC/TransportHandle.h>
 #include <LibGfx/Cursor.h>
 #include <LibGfx/SharedImage.h>
@@ -116,6 +117,7 @@ endpoint WebContentClient
 
     did_update_navigation_buttons_state(u64 page_id, bool back_enabled, bool forward_enabled) =|
     did_allocate_backing_stores(u64 page_id, i32 front_bitmap_id, Gfx::SharedImage front_backing_store, i32 back_bitmap_id, Gfx::SharedImage back_backing_store) =|
+    did_allocate_vulkan_backing_stores(u64 page_id, i32 front_image_id, IPC::File front_fd, u64 front_allocation_size, u32 front_memory_type_index, u32 front_format, u32 front_width, u32 front_height, i32 back_image_id, IPC::File back_fd, u64 back_allocation_size, u32 back_memory_type_index, u32 back_format, u32 back_width, u32 back_height) =|
 
     did_change_audio_play_state(u64 page_id, Web::HTML::AudioPlayState play_state) =|
 

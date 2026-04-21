@@ -26,6 +26,30 @@ static String sdk_path(StringView output_directory, StringView filename)
     return MUST(String::formatted("{}/{}", output_directory.trim("/"sv, TrimMode::Right), filename));
 }
 
+static ErrorOr<String> quoted_string_literal(StringView value)
+{
+    StringBuilder builder;
+    builder.append('"');
+    for (auto ch : value) {
+        switch (ch) {
+        case '\\':
+            builder.append("\\\\"sv);
+            break;
+        case '"':
+            builder.append("\\\""sv);
+            break;
+        case '\n':
+            builder.append("\\n"sv);
+            break;
+        default:
+            builder.append_code_point(ch);
+            break;
+        }
+    }
+    builder.append('"');
+    return builder.to_string();
+}
+
 static String ts_type(BridgeValueType type)
 {
     switch (type) {
@@ -83,9 +107,27 @@ static ErrorOr<String> generate_typescript_declarations()
         builder.appendff("): {};\n\n", ts_type(function.return_type));
     }
     builder.append("}\n\n"sv);
+    builder.append("export interface MyceliumNetworking {\n"sv);
+    for (auto const& function : BridgeRegistry::the().functions()) {
+        if (!function.js_exposed || function.js_namespace != "net"sv)
+            continue;
+        builder.appendff("  /** {} */\n", function.description);
+        if (!function.throws.is_empty())
+            builder.appendff("  /** Throws: {} */\n", function.throws);
+        builder.appendff("  {}(", function.name);
+        for (size_t i = 0; i < function.arguments.size(); ++i) {
+            auto const& argument = function.arguments[i];
+            if (i > 0)
+                builder.append(", "sv);
+            builder.appendff("{}: {}", argument.name, ts_type(argument.type));
+        }
+        builder.appendff("): {};\n\n", ts_type(function.return_type));
+    }
+    builder.append("}\n\n"sv);
     builder.append("export interface MyceliumNative {\n"sv);
     builder.append("  readonly api: MyceliumApi;\n\n"sv);
     builder.append("  readonly fs: MyceliumFileSystem;\n\n"sv);
+    builder.append("  readonly net: MyceliumNetworking;\n\n"sv);
 
     for (auto const& function : BridgeRegistry::the().functions()) {
         if (!function.js_exposed || !function.js_namespace.is_empty())
@@ -154,6 +196,7 @@ static ErrorOr<String> generate_javascript_wrapper()
     builder.append("  native: mycelium,\n"sv);
     builder.append("  api: mycelium.api,\n\n"sv);
     builder.append("  fs: mycelium.fs,\n\n"sv);
+    builder.append("  net: mycelium.net,\n\n"sv);
     builder.append("  log(message) {\n    mycelium.log(message);\n  },\n\n"sv);
     builder.append("  spawnEntity() {\n    return makeEntityHandle(mycelium.spawnEntity());\n  },\n\n"sv);
     builder.append("  entityCount() {\n    return mycelium.entityCount();\n  },\n\n"sv);
@@ -229,6 +272,72 @@ static ErrorOr<String> generate_wasm_imports()
     return builder.to_string();
 }
 
+static String assemblyscript_type(BridgeValueType type)
+{
+    switch (type) {
+    case BridgeValueType::Void:
+        return "void"_string;
+    case BridgeValueType::Boolean:
+        return "bool"_string;
+    case BridgeValueType::Number:
+        return "f64"_string;
+    case BridgeValueType::String:
+        return "usize"_string;
+    case BridgeValueType::EntityId:
+        return "i32"_string;
+    case BridgeValueType::Float32Array:
+        return "usize"_string;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static void append_assemblyscript_parameters(StringBuilder& builder, BridgeFunction const& function)
+{
+    bool first = true;
+    for (auto const& argument : function.arguments) {
+        if (!first)
+            builder.append(", "sv);
+        first = false;
+
+        switch (argument.type) {
+        case BridgeValueType::String:
+            builder.appendff("{}Ptr: usize, {}Len: i32", argument.name, argument.name);
+            break;
+        case BridgeValueType::Float32Array:
+            builder.appendff("{}Ptr: usize", argument.name);
+            break;
+        default:
+            builder.appendff("{}: {}", argument.name, assemblyscript_type(argument.type));
+            break;
+        }
+    }
+}
+
+static ErrorOr<String> generate_assemblyscript_declarations()
+{
+    StringBuilder builder;
+    append_generated_header(builder);
+    builder.append("// Low-level AssemblyScript declarations for MyceliumVR WASM imports.\n"sv);
+    builder.append("// String arguments are UTF-8 pointer/length pairs; do not pass AssemblyScript's UTF-16 string storage directly.\n\n"sv);
+    builder.append("export type EntityId = i32;\n"sv);
+    builder.append("export type BytePointer = usize;\n\n"sv);
+
+    for (auto const& function : BridgeRegistry::the().functions()) {
+        if (!function.wasm_exposed)
+            continue;
+
+        builder.appendff("/** {} */\n", function.description);
+        if (!function.throws.is_empty())
+            builder.appendff("/** Throws: {} */\n", function.throws);
+        builder.appendff("@external(\"mycelium\", {})\n", TRY(quoted_string_literal(function.name)));
+        builder.appendff("export declare function {}(", function.name);
+        append_assemblyscript_parameters(builder, function);
+        builder.appendff("): {};\n\n", assemblyscript_type(function.return_type));
+    }
+
+    return builder.to_string();
+}
+
 static ErrorOr<String> generate_api_json()
 {
     StringBuilder builder;
@@ -269,15 +378,18 @@ ErrorOr<void> generate_sdk(StringView target, StringView output_directory)
     auto normalized_target = target.is_empty() ? "all"sv : target;
 
     auto write_typescript = normalized_target == "all"sv || normalized_target == "typescript"sv || normalized_target == "ts"sv;
+    auto write_assemblyscript = normalized_target == "all"sv || normalized_target == "assemblyscript"sv || normalized_target == "as"sv;
     auto write_javascript = normalized_target == "all"sv || normalized_target == "javascript"sv || normalized_target == "js"sv;
     auto write_wasm = normalized_target == "all"sv || normalized_target == "wasm"sv;
     auto write_json = normalized_target == "all"sv || normalized_target == "json"sv || normalized_target == "api-json"sv;
 
-    if (!write_typescript && !write_javascript && !write_wasm && !write_json)
-        return Error::from_string_literal("Unknown SDK target. Use all, typescript, javascript, wasm, or json.");
+    if (!write_typescript && !write_assemblyscript && !write_javascript && !write_wasm && !write_json)
+        return Error::from_string_literal("Unknown SDK target. Use all, typescript, assemblyscript, javascript, wasm, or json.");
 
     if (write_typescript)
         TRY(write_text_file(sdk_path(output_directory, "mycelium.d.ts"sv), TRY(generate_typescript_declarations())));
+    if (write_assemblyscript)
+        TRY(write_text_file(sdk_path(output_directory, "mycelium.as.ts"sv), TRY(generate_assemblyscript_declarations())));
     if (write_javascript)
         TRY(write_text_file(sdk_path(output_directory, "mycelium.js"sv), TRY(generate_javascript_wrapper())));
     if (write_wasm)

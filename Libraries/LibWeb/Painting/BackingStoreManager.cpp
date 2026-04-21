@@ -5,6 +5,7 @@
  */
 
 #include <LibCore/Timer.h>
+#include <LibGfx/ExternalVulkanImage.h>
 #include <LibGfx/PaintingSurface.h>
 #include <LibGfx/SharedImageBuffer.h>
 #include <LibGfx/SkiaBackendContext.h>
@@ -47,11 +48,6 @@ void BackingStoreManager::reallocate_backing_stores(Gfx::IntSize size)
     m_front_bitmap_id = m_next_bitmap_id++;
     m_back_bitmap_id = m_next_bitmap_id++;
 
-    if (m_navigable->is_top_level_traversable()) {
-        auto& page_client = m_navigable->top_level_traversable()->page().client();
-        page_client.page_did_allocate_backing_stores(m_front_bitmap_id, front_buffer.export_shared_image(), m_back_bitmap_id, back_buffer.export_shared_image());
-    }
-
 #ifdef AK_OS_MACOS
     if (skia_backend_context) {
         front_store = Gfx::PaintingSurface::create_from_shared_image_buffer(front_buffer, *skia_backend_context);
@@ -60,19 +56,81 @@ void BackingStoreManager::reallocate_backing_stores(Gfx::IntSize size)
         front_store = Gfx::PaintingSurface::wrap_bitmap(*front_buffer.bitmap());
         back_store = Gfx::PaintingSurface::wrap_bitmap(*back_buffer.bitmap());
     }
+    if (m_navigable->is_top_level_traversable()) {
+        auto& page_client = m_navigable->top_level_traversable()->page().client();
+        page_client.page_did_allocate_backing_stores(m_front_bitmap_id, front_buffer.export_shared_image(), m_back_bitmap_id, back_buffer.export_shared_image());
+    }
 #else
 #    ifdef USE_VULKAN
-    if (skia_backend_context) {
-        front_store = Gfx::PaintingSurface::create_with_size(size, Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
-        auto front_bitmap = front_buffer.bitmap();
-        front_store->on_flush = [front_bitmap = move(front_bitmap)](auto& surface) {
-            surface.read_into_bitmap(*front_bitmap);
-        };
-        back_store = Gfx::PaintingSurface::create_with_size(size, Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
-        auto back_bitmap = back_buffer.bitmap();
-        back_store->on_flush = [back_bitmap = move(back_bitmap)](auto& surface) {
-            surface.read_into_bitmap(*back_bitmap);
-        };
+    if (skia_backend_context && m_navigable->is_top_level_traversable()) {
+        auto& page_client = m_navigable->top_level_traversable()->page().client();
+        if (page_client.client_supports_vulkan_external_images()) {
+            bool zero_copy_ready = false;
+            // Zero-copy path: Skia renders directly into exportable VkImages.
+            // MyceliumVR imports them without any CPU transfer.
+            auto& vulkan_context = skia_backend_context->vulkan_context();
+            auto front_image = MUST(Gfx::ExportableVulkanImage::create(vulkan_context, size.width(), size.height()));
+            auto back_image = MUST(Gfx::ExportableVulkanImage::create(vulkan_context, size.width(), size.height()));
+            auto maybe_front_store = Gfx::PaintingSurface::create_from_exportable_vulkan_image(*skia_backend_context, front_image);
+            auto maybe_back_store = Gfx::PaintingSurface::create_from_exportable_vulkan_image(*skia_backend_context, back_image);
+            if (!maybe_front_store.is_error() && !maybe_back_store.is_error()) {
+                front_store = maybe_front_store.release_value();
+                back_store = maybe_back_store.release_value();
+                // release() transfers fd ownership to PageClient → IPC::File::adopt_fd.
+                auto front_handle = MUST(front_image->export_handle());
+                auto back_handle = MUST(back_image->export_handle());
+                page_client.page_did_allocate_vulkan_backing_stores(
+                    m_front_bitmap_id,
+                    front_handle.release(), front_handle.allocation_size, front_handle.memory_type_index,
+                    static_cast<u32>(front_handle.format), front_handle.width, front_handle.height,
+                    m_back_bitmap_id,
+                    back_handle.release(), back_handle.allocation_size, back_handle.memory_type_index,
+                    static_cast<u32>(back_handle.format), back_handle.width, back_handle.height);
+                zero_copy_ready = true;
+            } else {
+                if (maybe_front_store.is_error())
+                    warnln("BackingStoreManager: front zero-copy backing store setup failed: {}", maybe_front_store.error());
+                if (maybe_back_store.is_error())
+                    warnln("BackingStoreManager: back zero-copy backing store setup failed: {}", maybe_back_store.error());
+                warnln("BackingStoreManager: falling back to CPU backing stores");
+            }
+
+            if (!zero_copy_ready) {
+                // CPU readback fallback: render to GPU then copy pixels to shared bitmap.
+                page_client.page_did_allocate_backing_stores(m_front_bitmap_id, front_buffer.export_shared_image(), m_back_bitmap_id, back_buffer.export_shared_image());
+                front_store = Gfx::PaintingSurface::create_with_size(size, Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
+                auto front_bitmap = front_buffer.bitmap();
+                front_store->on_flush = [front_bitmap = move(front_bitmap)](auto& surface) {
+                    surface.read_into_bitmap(*front_bitmap);
+                };
+                back_store = Gfx::PaintingSurface::create_with_size(size, Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
+                auto back_bitmap = back_buffer.bitmap();
+                back_store->on_flush = [back_bitmap = move(back_bitmap)](auto& surface) {
+                    surface.read_into_bitmap(*back_bitmap);
+                };
+            }
+        } else {
+            // CPU readback fallback: render to GPU then copy pixels to shared bitmap.
+            page_client.page_did_allocate_backing_stores(m_front_bitmap_id, front_buffer.export_shared_image(), m_back_bitmap_id, back_buffer.export_shared_image());
+            front_store = Gfx::PaintingSurface::create_with_size(size, Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
+            auto front_bitmap = front_buffer.bitmap();
+            front_store->on_flush = [front_bitmap = move(front_bitmap)](auto& surface) {
+                surface.read_into_bitmap(*front_bitmap);
+            };
+            back_store = Gfx::PaintingSurface::create_with_size(size, Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
+            auto back_bitmap = back_buffer.bitmap();
+            back_store->on_flush = [back_bitmap = move(back_bitmap)](auto& surface) {
+                surface.read_into_bitmap(*back_bitmap);
+            };
+        }
+    } else if (m_navigable->is_top_level_traversable()) {
+        auto& page_client = m_navigable->top_level_traversable()->page().client();
+        page_client.page_did_allocate_backing_stores(m_front_bitmap_id, front_buffer.export_shared_image(), m_back_bitmap_id, back_buffer.export_shared_image());
+    }
+#    else
+    if (m_navigable->is_top_level_traversable()) {
+        auto& page_client = m_navigable->top_level_traversable()->page().client();
+        page_client.page_did_allocate_backing_stores(m_front_bitmap_id, front_buffer.export_shared_image(), m_back_bitmap_id, back_buffer.export_shared_image());
     }
 #    endif
 

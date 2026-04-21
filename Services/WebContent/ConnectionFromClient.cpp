@@ -86,6 +86,11 @@ Messages::WebContentServer::InitTransportResponse ConnectionFromClient::init_tra
     VERIFY_NOT_REACHED();
 }
 
+void ConnectionFromClient::set_use_vulkan_external_images(bool supported)
+{
+    m_client_supports_vulkan_external_images = supported;
+}
+
 Optional<PageClient&> ConnectionFromClient::page(u64 index, SourceLocation location)
 {
     if (auto page = m_page_host->page(index); page.has_value())

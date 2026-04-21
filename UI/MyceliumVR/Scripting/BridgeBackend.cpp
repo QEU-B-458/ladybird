@@ -7,27 +7,34 @@
 
 namespace MyceliumVR {
 
-BridgeBackend::BridgeBackend(World& world, Function<void(VulkanRenderer::CameraState const&)> set_camera_state, Function<VulkanRenderer::CameraState()> camera_state, Function<void(VulkanRenderer::SceneLightData const&)> set_scene_light, Function<VulkanRenderer::SceneLightData()> scene_light)
+BridgeBackend::BridgeBackend(World& world, WorldRuntimeHost* runtime_host)
     : m_world(world)
-    , m_set_camera_state(move(set_camera_state))
-    , m_camera_state(move(camera_state))
-    , m_set_scene_light(move(set_scene_light))
-    , m_scene_light(move(scene_light))
+    , m_runtime_host(runtime_host)
 {
 }
 
 void BridgeBackend::log(String message)
 {
     outln("[mycelium] {}", message);
+    if (m_log_callback)
+        m_log_callback("info"sv, "script"sv, message.bytes_as_string_view());
 }
 
 EntityId BridgeBackend::spawn_entity()
 {
+    if (m_supervisor_client) {
+        auto response = m_supervisor_client->send_sync<Messages::Supervisor::SpawnEntity>();
+        return static_cast<EntityId>(response->entity_id());
+    }
     return m_world.spawn_entity();
 }
 
 bool BridgeBackend::destroy_entity(EntityId entity)
 {
+    if (m_supervisor_client) {
+        auto response = m_supervisor_client->send_sync<Messages::Supervisor::DestroyEntity>(static_cast<u32>(entity));
+        return response->ok();
+    }
     return m_world.destroy_entity(entity);
 }
 
@@ -91,21 +98,37 @@ u32 BridgeBackend::commit_transform_buffer(ReadonlySpan<float> buffer, u32 count
 
 bool BridgeBackend::set_mesh(EntityId entity, String mesh)
 {
+    if (m_supervisor_client) {
+        auto response = m_supervisor_client->send_sync<Messages::Supervisor::SetMesh>(static_cast<u32>(entity), mesh);
+        return response->ok();
+    }
     return m_world.set_mesh(entity, move(mesh));
 }
 
 bool BridgeBackend::set_material(EntityId entity, String material)
 {
+    if (m_supervisor_client) {
+        auto response = m_supervisor_client->send_sync<Messages::Supervisor::SetMaterial>(static_cast<u32>(entity), material);
+        return response->ok();
+    }
     return m_world.set_material(entity, move(material));
 }
 
 bool BridgeBackend::set_normal_map(EntityId entity, String normal_map)
 {
+    if (m_supervisor_client) {
+        auto response = m_supervisor_client->send_sync<Messages::Supervisor::SetNormalMap>(static_cast<u32>(entity), normal_map);
+        return response->ok();
+    }
     return m_world.set_normal_map(entity, move(normal_map));
 }
 
 bool BridgeBackend::create_panel(EntityId entity, String url, double width, double height)
 {
+    if (m_supervisor_client) {
+        auto response = m_supervisor_client->send_sync<Messages::Supervisor::CreatePanel>(static_cast<u32>(entity), url, static_cast<float>(width), static_cast<float>(height));
+        return response->ok();
+    }
     return m_world.create_panel(entity, move(url), static_cast<float>(width), static_cast<float>(height));
 }
 
@@ -131,42 +154,42 @@ Optional<Transform> BridgeBackend::transform_for_entity(EntityId entity) const
 
 void BridgeBackend::set_camera(double px, double py, double pz, double yaw_degrees, double pitch_degrees)
 {
-    if (!m_set_camera_state)
+    if (!m_runtime_host)
         return;
 
-    VulkanRenderer::CameraState camera_state {};
+    CameraState camera_state {};
     camera_state.position[0] = static_cast<float>(px);
     camera_state.position[1] = static_cast<float>(py);
     camera_state.position[2] = static_cast<float>(pz);
     camera_state.yaw_degrees = static_cast<float>(yaw_degrees);
     camera_state.pitch_degrees = static_cast<float>(pitch_degrees);
-    m_set_camera_state(camera_state);
+    m_runtime_host->set_camera_state(camera_state);
 }
 
-Optional<VulkanRenderer::CameraState> BridgeBackend::camera_state() const
+Optional<CameraState> BridgeBackend::camera_state() const
 {
-    if (!m_camera_state)
+    if (!m_runtime_host)
         return {};
-    return m_camera_state();
+    return m_runtime_host->camera_state();
 }
 
 void BridgeBackend::set_ambient_light(double r, double g, double b, double intensity)
 {
-    if (!m_set_scene_light)
+    if (!m_runtime_host)
         return;
-    auto light = m_scene_light ? m_scene_light() : VulkanRenderer::SceneLightData {};
+    auto light = m_runtime_host->scene_light();
     light.ambient_rgb[0] = static_cast<float>(r);
     light.ambient_rgb[1] = static_cast<float>(g);
     light.ambient_rgb[2] = static_cast<float>(b);
     light.ambient_intensity = static_cast<float>(intensity);
-    m_set_scene_light(light);
+    m_runtime_host->set_scene_light(light);
 }
 
 void BridgeBackend::set_directional_light(double to_x, double to_y, double to_z, double r, double g, double b, double intensity)
 {
-    if (!m_set_scene_light)
+    if (!m_runtime_host)
         return;
-    auto light = m_scene_light ? m_scene_light() : VulkanRenderer::SceneLightData {};
+    auto light = m_runtime_host->scene_light();
     light.light_to_xyz[0] = static_cast<float>(to_x);
     light.light_to_xyz[1] = static_cast<float>(to_y);
     light.light_to_xyz[2] = static_cast<float>(to_z);
@@ -174,14 +197,14 @@ void BridgeBackend::set_directional_light(double to_x, double to_y, double to_z,
     light.light_rgb[1] = static_cast<float>(g);
     light.light_rgb[2] = static_cast<float>(b);
     light.light_intensity = static_cast<float>(intensity);
-    m_set_scene_light(light);
+    m_runtime_host->set_scene_light(light);
 }
 
 void BridgeBackend::set_point_light(int index, double x, double y, double z, double r, double g, double b, double intensity, double radius)
 {
-    if (!m_set_scene_light || index < 0 || index >= MaxPointLights)
+    if (!m_runtime_host || index < 0 || index >= MaxPointLights)
         return;
-    auto light = m_scene_light ? m_scene_light() : VulkanRenderer::SceneLightData {};
+    auto light = m_runtime_host->scene_light();
     auto& pl = light.point_lights[index];
     pl.position[0] = static_cast<float>(x);
     pl.position[1] = static_cast<float>(y);
@@ -193,14 +216,14 @@ void BridgeBackend::set_point_light(int index, double x, double y, double z, dou
     pl.radius = static_cast<float>(radius);
     if (index >= light.point_light_count)
         light.point_light_count = index + 1;
-    m_set_scene_light(light);
+    m_runtime_host->set_scene_light(light);
 }
 
 void BridgeBackend::set_spot_light(int index, double x, double y, double z, double dx, double dy, double dz, double inner_deg, double outer_deg, double r, double g, double b, double intensity, double radius)
 {
-    if (!m_set_scene_light || index < 0 || index >= MaxPointLights)
+    if (!m_runtime_host || index < 0 || index >= MaxPointLights)
         return;
-    auto light = m_scene_light ? m_scene_light() : VulkanRenderer::SceneLightData {};
+    auto light = m_runtime_host->scene_light();
     auto& pl = light.point_lights[index];
     pl.position[0] = static_cast<float>(x);
     pl.position[1] = static_cast<float>(y);
@@ -225,23 +248,142 @@ void BridgeBackend::set_spot_light(int index, double x, double y, double z, doub
     pl.type = 1; // spot
     if (index >= light.point_light_count)
         light.point_light_count = index + 1;
-    m_set_scene_light(light);
+    m_runtime_host->set_scene_light(light);
 }
 
 void BridgeBackend::clear_point_lights()
 {
-    if (!m_set_scene_light)
+    if (!m_runtime_host)
         return;
-    auto light = m_scene_light ? m_scene_light() : VulkanRenderer::SceneLightData {};
+    auto light = m_runtime_host->scene_light();
     light.point_light_count = 0;
-    m_set_scene_light(light);
+    m_runtime_host->set_scene_light(light);
 }
 
-Optional<VulkanRenderer::SceneLightData> BridgeBackend::scene_light() const
+Optional<SceneLightData> BridgeBackend::scene_light() const
 {
-    if (!m_scene_light)
+    if (!m_runtime_host)
         return {};
-    return m_scene_light();
+    return m_runtime_host->scene_light();
+}
+
+Vector<EntityHierarchyEntry> BridgeBackend::get_entity_hierarchy() const
+{
+    auto& reg = m_world.registry();
+    Vector<EntityHierarchyEntry> entries;
+
+    for (auto entity : reg.storage<entt::entity>()) {
+        if (!reg.valid(entity)) continue;
+        EntityHierarchyEntry entry;
+        entry.id = entity;
+
+        if (auto const* name = reg.try_get<Name>(entity))
+            entry.name = name->value;
+        else
+            entry.name = MUST(String::formatted("entity_{}", static_cast<u32>(entity)));
+
+        if (auto const* parent = reg.try_get<Parent>(entity)) {
+            if (reg.valid(parent->id))
+                entry.parent_id = parent->id;
+        }
+
+        if (reg.try_get<MeshRenderer>(entity)) {
+            entry.kind = "mesh"_string;
+            if (reg.any_of<AlphaBlend>(entity))     entry.alpha_mode = 2;
+            else if (reg.any_of<AlphaClip>(entity)) entry.alpha_mode = 1;
+            else if (reg.any_of<AlphaHash>(entity)) entry.alpha_mode = 3;
+        } else if (reg.try_get<Panel>(entity)) {
+            entry.kind = "panel"_string;
+        } else {
+            entry.kind = "empty"_string;
+        }
+
+        entry.is_static = reg.any_of<Static>(entity);
+        entries.append(move(entry));
+    }
+
+    // Compute depth by walking up parent chain.
+    HashMap<EntityId, int> depth_cache;
+    for (auto& entry : entries) {
+        int depth = 0;
+        EntityId current = entry.parent_id;
+        size_t guard = entries.size() + 1;
+        while (reg.valid(current) && guard-- > 0) {
+            ++depth;
+            auto const* p = reg.try_get<Parent>(current);
+            if (!p || !reg.valid(p->id)) break;
+            current = p->id;
+        }
+        entry.depth = depth;
+    }
+
+    return entries;
+}
+
+Optional<EntityComponentSnapshot> BridgeBackend::get_entity_components(EntityId entity) const
+{
+    auto& reg = m_world.registry();
+    if (!reg.valid(entity))
+        return {};
+
+    EntityComponentSnapshot snap;
+    snap.id = entity;
+
+    if (auto const* name = reg.try_get<Name>(entity))
+        snap.name = name->value;
+    else
+        snap.name = MUST(String::formatted("entity_{}", static_cast<u32>(entity)));
+
+    if (auto const* t = reg.try_get<Transform>(entity)) {
+        snap.position[0] = t->position[0];
+        snap.position[1] = t->position[1];
+        snap.position[2] = t->position[2];
+        snap.rotation[0] = t->rotation[0];
+        snap.rotation[1] = t->rotation[1];
+        snap.rotation[2] = t->rotation[2];
+        snap.rotation[3] = t->rotation[3];
+        snap.scale[0] = t->scale[0];
+        snap.scale[1] = t->scale[1];
+        snap.scale[2] = t->scale[2];
+    }
+
+    if (auto const* mr = reg.try_get<MeshRenderer>(entity)) {
+        snap.has_mesh_renderer = true;
+        snap.mesh = mr->mesh;
+        snap.material = mr->material;
+        snap.normal_map = mr->normal_map;
+    }
+
+    if (auto const* panel = reg.try_get<Panel>(entity)) {
+        snap.has_panel = true;
+        snap.panel_width = panel->width;
+        snap.panel_height = panel->height;
+    }
+
+    if (auto const* cull = reg.try_get<CullOverride>(entity)) {
+        snap.has_cull_override = true;
+        snap.cull_mode = cull->mode;
+    }
+
+    snap.is_static   = reg.any_of<Static>(entity);
+    snap.alpha_blend = reg.any_of<AlphaBlend>(entity);
+    snap.alpha_clip  = reg.any_of<AlphaClip>(entity);
+    snap.alpha_hash  = reg.any_of<AlphaHash>(entity);
+
+    return snap;
+}
+
+void BridgeBackend::set_selected_entity(EntityId entity)
+{
+    auto& reg = m_world.registry();
+    // Clear all existing selections.
+    auto selected_view = reg.view<Selected>();
+    reg.remove<Selected>(selected_view.begin(), selected_view.end());
+    // Apply new selection.
+    if (reg.valid(entity))
+        reg.emplace_or_replace<Selected>(entity);
+    if (m_on_selection_changed)
+        m_on_selection_changed(entity);
 }
 
 }

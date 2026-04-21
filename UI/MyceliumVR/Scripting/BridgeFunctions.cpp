@@ -17,6 +17,7 @@
 #include "BridgeRegistry.h"
 #include "ScriptRuntime.h"
 
+#include "../Networking/NetworkService.h"
 #include "../Support/GltfLoader.h"
 
 #include <AK/Format.h>
@@ -38,7 +39,7 @@ namespace MyceliumVR::BridgeFunctions {
 // ============================================================
 
 // Must match the number of impl blocks in bind_all().
-static constexpr size_t BRIDGE_FUNCTION_COUNT = 23;
+static constexpr size_t BRIDGE_FUNCTION_COUNT = 33;
 
 static BridgeFunction const s_metadata[BRIDGE_FUNCTION_COUNT] = {
     // -- Debug --
@@ -250,6 +251,31 @@ static BridgeFunction const s_metadata[BRIDGE_FUNCTION_COUNT] = {
         .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = false,
         .throws = ""sv,
     },
+    // -- Hierarchy / Selection --
+    {
+        .module = "World"sv, .js_namespace = ""sv, .name = "getEntityComponents"sv,
+        .description = "Return an object with all live component data for an entity: transform, meshRenderer, panel, cullOverride, tags. Returns null for invalid entities."sv,
+        .return_type = BridgeValueType::Number, // object, approximated
+        .arguments = { { "entity"sv, BridgeValueType::EntityId } },
+        .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = false,
+        .throws = ""sv,
+    },
+    {
+        .module = "World"sv, .js_namespace = ""sv, .name = "getEntityHierarchy"sv,
+        .description = "Return an array of all live entities with name, kind, parent, alpha mode, and static flag."sv,
+        .return_type = BridgeValueType::Number, // Array, approximated
+        .arguments = {},
+        .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = false,
+        .throws = ""sv,
+    },
+    {
+        .module = "World"sv, .js_namespace = ""sv, .name = "setSelectedEntity"sv,
+        .description = "Set the selected entity by ID, clearing any previous selection. Fires __myceliumSelectionChanged in the overlay."sv,
+        .return_type = BridgeValueType::Void,
+        .arguments = { { "entity"sv, BridgeValueType::EntityId } },
+        .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = false,
+        .throws = ""sv,
+    },
     // -- Panel --
     {
         .module = "Panel"sv, .js_namespace = ""sv, .name = "createPanel"sv,
@@ -263,6 +289,63 @@ static BridgeFunction const s_metadata[BRIDGE_FUNCTION_COUNT] = {
         },
         .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = true,
         .throws = "RangeError for invalid EntityId."sv,
+    },
+    // -- Networking --
+    {
+        .module = "Networking"sv, .js_namespace = "net"sv, .name = "getBootstrapInfo"sv,
+        .description = "Return bootstrap JSON info for the world."sv,
+        .return_type = BridgeValueType::String,
+        .arguments = {},
+        .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = true,
+        .throws = ""sv,
+    },
+    {
+        .module = "Networking"sv, .js_namespace = "net"sv, .name = "connect"sv,
+        .description = "Establish a new network connection."sv,
+        .return_type = BridgeValueType::Number,
+        .arguments = { { "kind"sv, BridgeValueType::String }, { "address"sv, BridgeValueType::String } },
+        .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = true,
+        .throws = ""sv,
+    },
+    {
+        .module = "Networking"sv, .js_namespace = "net"sv, .name = "send"sv,
+        .description = "Send data over a connection."sv,
+        .return_type = BridgeValueType::Number,
+        .arguments = { { "handle"sv, BridgeValueType::Number }, { "payload"sv, BridgeValueType::String }, { "flags"sv, BridgeValueType::Number } },
+        .hot_path = true, .debug = false, .js_exposed = true, .wasm_exposed = true,
+        .throws = ""sv,
+    },
+    {
+        .module = "Networking"sv, .js_namespace = "net"sv, .name = "recv"sv,
+        .description = "Receive data from a connection."sv,
+        .return_type = BridgeValueType::String,
+        .arguments = { { "handle"sv, BridgeValueType::Number } },
+        .hot_path = true, .debug = false, .js_exposed = true, .wasm_exposed = true,
+        .throws = ""sv,
+    },
+    {
+        .module = "Networking"sv, .js_namespace = "net"sv, .name = "pollEvent"sv,
+        .description = "Poll for the next network event."sv,
+        .return_type = BridgeValueType::String,
+        .arguments = {},
+        .hot_path = true, .debug = false, .js_exposed = true, .wasm_exposed = true,
+        .throws = ""sv,
+    },
+    {
+        .module = "Networking"sv, .js_namespace = "net"sv, .name = "close"sv,
+        .description = "Close a network connection."sv,
+        .return_type = BridgeValueType::Void,
+        .arguments = { { "handle"sv, BridgeValueType::Number } },
+        .hot_path = false, .debug = false, .js_exposed = true, .wasm_exposed = true,
+        .throws = ""sv,
+    },
+    {
+        .module = "Networking"sv, .js_namespace = "net"sv, .name = "nowMs"sv,
+        .description = "Return current host time in milliseconds."sv,
+        .return_type = BridgeValueType::Number,
+        .arguments = {},
+        .hot_path = true, .debug = false, .js_exposed = true, .wasm_exposed = true,
+        .throws = ""sv,
     },
     // fs.*, input.*, and api.* are bound as namespaced sub-objects but not
     // individually listed here — they are implicitly covered by the sub-object
@@ -351,7 +434,8 @@ void bind_all(
     JS::Object& mycelium,
     JS::Object& api,
     JS::Object& fs,
-    JS::Object& input)
+    JS::Object& input,
+    JS::Object& net)
 {
     // Registry is pre-populated from s_metadata[] in BridgeRegistry's constructor.
     // bind_all only needs to bind the impl lambdas to JS objects.
@@ -604,7 +688,95 @@ void bind_all(
         return JS::Value(object);
     }, 0); // getSceneLight
 
-    // -- Panel --
+    // -- Hierarchy / Selection --
+    reg(mycelium, [&runtime, &realm](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto entity_val = TRY(vm.argument(0).to_u32(vm));
+        auto snap = runtime.bridge_backend().get_entity_components(static_cast<EntityId>(entity_val));
+        if (!snap.has_value())
+            return JS::js_null();
+        auto& s = *snap;
+        auto obj = JS::Object::create(realm, realm.intrinsics().object_prototype());
+        TRY(obj->create_data_property("id"_utf16_fly_string, JS::Value(static_cast<u32>(s.id))));
+        TRY(obj->create_data_property("name"_utf16_fly_string, JS::PrimitiveString::create(vm, s.name)));
+
+        auto xf = JS::Object::create(realm, realm.intrinsics().object_prototype());
+        TRY(xf->create_data_property("px"_utf16_fly_string, JS::Value(s.position[0])));
+        TRY(xf->create_data_property("py"_utf16_fly_string, JS::Value(s.position[1])));
+        TRY(xf->create_data_property("pz"_utf16_fly_string, JS::Value(s.position[2])));
+        TRY(xf->create_data_property("qx"_utf16_fly_string, JS::Value(s.rotation[0])));
+        TRY(xf->create_data_property("qy"_utf16_fly_string, JS::Value(s.rotation[1])));
+        TRY(xf->create_data_property("qz"_utf16_fly_string, JS::Value(s.rotation[2])));
+        TRY(xf->create_data_property("qw"_utf16_fly_string, JS::Value(s.rotation[3])));
+        TRY(xf->create_data_property("sx"_utf16_fly_string, JS::Value(s.scale[0])));
+        TRY(xf->create_data_property("sy"_utf16_fly_string, JS::Value(s.scale[1])));
+        TRY(xf->create_data_property("sz"_utf16_fly_string, JS::Value(s.scale[2])));
+        TRY(obj->create_data_property("transform"_utf16_fly_string, JS::Value(xf)));
+
+        if (s.has_mesh_renderer) {
+            auto mr = JS::Object::create(realm, realm.intrinsics().object_prototype());
+            TRY(mr->create_data_property("mesh"_utf16_fly_string,      JS::PrimitiveString::create(vm, s.mesh)));
+            TRY(mr->create_data_property("material"_utf16_fly_string,  JS::PrimitiveString::create(vm, s.material)));
+            TRY(mr->create_data_property("normalMap"_utf16_fly_string, JS::PrimitiveString::create(vm, s.normal_map)));
+            TRY(obj->create_data_property("meshRenderer"_utf16_fly_string, JS::Value(mr)));
+        } else {
+            TRY(obj->create_data_property("meshRenderer"_utf16_fly_string, JS::js_null()));
+        }
+
+        if (s.has_panel) {
+            auto panel = JS::Object::create(realm, realm.intrinsics().object_prototype());
+            TRY(panel->create_data_property("width"_utf16_fly_string,  JS::Value(s.panel_width)));
+            TRY(panel->create_data_property("height"_utf16_fly_string, JS::Value(s.panel_height)));
+            TRY(obj->create_data_property("panel"_utf16_fly_string, JS::Value(panel)));
+        } else {
+            TRY(obj->create_data_property("panel"_utf16_fly_string, JS::js_null()));
+        }
+
+        if (s.has_cull_override) {
+            StringView cull_str = s.cull_mode == CullOverride::Mode::Front     ? "front"sv
+                                : s.cull_mode == CullOverride::Mode::Disabled  ? "disabled"sv
+                                : "back"sv;
+            TRY(obj->create_data_property("cull"_utf16_fly_string, JS::PrimitiveString::create(vm, MUST(String::from_utf8(cull_str)))));
+        } else {
+            TRY(obj->create_data_property("cull"_utf16_fly_string, JS::js_null()));
+        }
+
+        auto tags = JS::Object::create(realm, realm.intrinsics().object_prototype());
+        TRY(tags->create_data_property("isStatic"_utf16_fly_string,   JS::Value(s.is_static)));
+        TRY(tags->create_data_property("alphaBlend"_utf16_fly_string, JS::Value(s.alpha_blend)));
+        TRY(tags->create_data_property("alphaClip"_utf16_fly_string,  JS::Value(s.alpha_clip)));
+        TRY(tags->create_data_property("alphaHash"_utf16_fly_string,  JS::Value(s.alpha_hash)));
+        TRY(obj->create_data_property("tags"_utf16_fly_string, JS::Value(tags)));
+        return JS::Value(obj);
+    }, 1); // getEntityComponents
+
+    reg(mycelium, [&runtime, &realm](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto entries = runtime.bridge_backend().get_entity_hierarchy();
+        static StringView const alpha_names[] = { "opaque"sv, "clip"sv, "blend"sv, "hash"sv };
+        auto array = TRY(JS::Array::create(realm, entries.size()));
+        for (u32 i = 0; i < entries.size(); ++i) {
+            auto const& e = entries[i];
+            auto obj = JS::Object::create(realm, realm.intrinsics().object_prototype());
+            TRY(obj->create_data_property("id"_utf16_fly_string,     JS::Value(static_cast<u32>(e.id))));
+            TRY(obj->create_data_property("name"_utf16_fly_string,   JS::PrimitiveString::create(vm, e.name)));
+            TRY(obj->create_data_property("kind"_utf16_fly_string,   JS::PrimitiveString::create(vm, e.kind)));
+            auto alpha_idx = static_cast<size_t>(e.alpha_mode);
+            if (alpha_idx >= 4) alpha_idx = 0;
+            TRY(obj->create_data_property("alpha"_utf16_fly_string,  JS::PrimitiveString::create(vm, MUST(String::from_utf8(alpha_names[alpha_idx])))));
+            TRY(obj->create_data_property("static"_utf16_fly_string, JS::Value(e.is_static)));
+            TRY(obj->create_data_property("depth"_utf16_fly_string,  JS::Value(e.depth)));
+            if (e.parent_id != entt::null)
+                TRY(obj->create_data_property("parent"_utf16_fly_string, JS::Value(static_cast<u32>(e.parent_id))));
+            TRY(array->create_data_property_or_throw(i, JS::Value(obj)));
+        }
+        return JS::Value(array);
+    }, 0); // getEntityHierarchy
+
+    reg(mycelium, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto entity_val = TRY(vm.argument(0).to_u32(vm));
+        runtime.bridge_backend().set_selected_entity(static_cast<EntityId>(entity_val));
+        return JS::js_undefined();
+    }, 1); // setSelectedEntity
+
     reg(mycelium, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
         auto entity = TRY(validated_entity(vm, runtime.bridge_backend(), 0, "createPanel"sv));
         auto url    = TRY(vm.argument(1).to_string(vm));
@@ -612,6 +784,57 @@ void bind_all(
         auto height = TRY(vm.argument(3).to_double(vm));
         return JS::Value(runtime.bridge_backend().create_panel(entity, move(url), width, height));
     }, 4); // createPanel
+
+    // -- Networking --
+    reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        // TODO: Implement getBootstrapInfo
+        (void)runtime;
+        return JS::PrimitiveString::create(vm, "{}"_string);
+    }, 0); // getBootstrapInfo
+
+    reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto kind = TRY(vm.argument(0).to_string(vm));
+        auto addr = TRY(vm.argument(1).to_string(vm));
+        auto handle_or_error = runtime.network_service().connect(kind, addr);
+        if (handle_or_error.is_error())
+            return vm.throw_completion<JS::Error>(MUST(String::from_utf8(handle_or_error.error().string_literal())));
+        return JS::Value(handle_or_error.release_value());
+    }, 2); // connect
+
+    reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto handle = TRY(vm.argument(0).to_u32(vm));
+        auto payload = TRY(vm.argument(1).to_string(vm));
+        auto flags = TRY(vm.argument(2).to_u32(vm));
+        auto result = runtime.network_service().send(handle, payload.bytes(), flags);
+        if (result.is_error())
+            return vm.throw_completion<JS::Error>(MUST(String::from_utf8(result.error().string_literal())));
+        return JS::Value(0); // TODO: return actual bytes sent
+    }, 3); // send
+
+    reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto handle = TRY(vm.argument(0).to_u32(vm));
+        (void)handle;
+        (void)runtime;
+        // TODO: Implement recv
+        return JS::js_null();
+    }, 1); // recv
+
+    reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        (void)vm;
+        (void)runtime;
+        // TODO: Implement pollEvent
+        return JS::js_null();
+    }, 0); // pollEvent
+
+    reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+        auto handle = TRY(vm.argument(0).to_u32(vm));
+        runtime.network_service().close(handle);
+        return JS::js_undefined();
+    }, 1); // close
+
+    reg(net, [](JS::VM&) -> JS::ThrowCompletionOr<JS::Value> {
+        return JS::Value(static_cast<double>(SDL_GetTicks()));
+    }, 0); // nowMs
 
     // Verify no metadata/impl count drift.
     VERIFY(metadata_index == BRIDGE_FUNCTION_COUNT);

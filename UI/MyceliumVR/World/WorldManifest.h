@@ -8,13 +8,41 @@
 #include "../Support/VirtualFileSystem.h"
 
 #include <AK/String.h>
+#include <AK/Vector.h>
 
 namespace MyceliumVR {
 
 struct WorldManifest {
+    struct Permissions {
+        bool storage { false };
+        bool network { false };
+        bool wasm { false };
+    };
+
+    struct Networking {
+        String entry_wasm;
+        struct Bootstrap {
+            String mode;
+            Vector<String> urls;
+        } bootstrap;
+        Vector<String> transports;
+        bool public_listen { false };
+        u32 max_peers { 32 };
+        u32 protocol_version { 1 };
+    };
+
     String package_name;
     String name;
     String entry_script;
+    Permissions permissions;
+    Networking networking;
+};
+
+struct BootstrapInfo {
+    u32 world_id { 0 };
+    String package_name;
+    String mode;
+    Vector<String> bootstrap_urls;
 };
 
 ErrorOr<WorldManifest> load_world_manifest(VirtualFileSystem const&, StringView manifest_path);

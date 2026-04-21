@@ -23,6 +23,8 @@ class SkSurface;
 
 namespace Gfx {
 
+class ExportableVulkanImage;
+
 class PaintingSurface : public AtomicRefCounted<PaintingSurface> {
 public:
     enum class Origin {
@@ -41,6 +43,10 @@ public:
 
 #ifdef USE_VULKAN_IMAGES
     static NonnullRefPtr<PaintingSurface> create_from_vkimage(NonnullRefPtr<SkiaBackendContext> context, NonnullRefPtr<VulkanImage> vulkan_image, Origin origin);
+#endif
+
+#ifdef USE_VULKAN
+    static ErrorOr<NonnullRefPtr<PaintingSurface>> create_from_exportable_vulkan_image(NonnullRefPtr<SkiaBackendContext>, NonnullRefPtr<ExportableVulkanImage>);
 #endif
 
     void read_into_bitmap(Bitmap&);

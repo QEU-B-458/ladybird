@@ -4,9 +4,7 @@
  */
 
 #include "RenderGraph.h"
-#if defined(TRACY_ENABLE)
-#    include <tracy/Tracy.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 #include <AK/StringBuilder.h>
 #include <AK/NumericLimits.h>
 #include <AK/QuickSort.h>
@@ -474,12 +472,24 @@ void RenderPassBuilder::set_queue_preference(QueueKind queue)
 RenderGraph::RenderGraph(VulkanContext& ctx)
     : m_context(ctx)
 {
+    VkQueryPoolCreateInfo qp_info {
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .queryType = VK_QUERY_TYPE_TIMESTAMP,
+        .queryCount = k_max_timestamp_passes * 2,
+        .pipelineStatistics = 0,
+    };
+    if (vkCreateQueryPool(m_context.device(), &qp_info, nullptr, &m_timestamp_pool) != VK_SUCCESS)
+        m_timestamp_pool = VK_NULL_HANDLE;
 }
 
 RenderGraph::~RenderGraph()
 {
     for (auto& resource : m_resources)
         destroy_transient_resource(resource);
+    if (m_timestamp_pool != VK_NULL_HANDLE)
+        vkDestroyQueryPool(m_context.device(), m_timestamp_pool, nullptr);
 }
 
 void RenderGraph::destroy_transient_resource(ResourceNode& node)
@@ -509,6 +519,27 @@ void RenderGraph::reset_for_frame()
 {
     ZoneScoped;
     VERIFY(m_phase != Phase::Executing);
+
+    // Read back timestamps from the previous frame (fence was already waited in begin_frame).
+    if (m_timestamp_pool != VK_NULL_HANDLE && !m_pending_pass_names.is_empty()) {
+        u32 query_count = static_cast<u32>(min(m_pending_pass_names.size(), static_cast<size_t>(k_max_timestamp_passes))) * 2;
+        Vector<u64> timestamps;
+        timestamps.resize(query_count);
+        if (vkGetQueryPoolResults(m_context.device(), m_timestamp_pool, 0, query_count,
+                query_count * sizeof(u64), timestamps.data(), sizeof(u64),
+                VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+            m_last_frame_timings.clear();
+            float period = m_context.timestamp_period();
+            for (size_t i = 0; i < m_pending_pass_names.size() && i < k_max_timestamp_passes; ++i) {
+                u64 t_begin = timestamps[i * 2];
+                u64 t_end   = timestamps[i * 2 + 1];
+                double gpu_ms = static_cast<double>(t_end - t_begin) * static_cast<double>(period) / 1'000'000.0;
+                m_last_frame_timings.append({ m_pending_pass_names[i], gpu_ms });
+            }
+        }
+        vkResetQueryPool(m_context.device(), m_timestamp_pool, 0, query_count);
+        m_pending_pass_names.clear();
+    }
     m_passes.clear();
     m_pass_nodes.clear();
     m_outputs.clear();
@@ -1776,6 +1807,13 @@ ErrorOr<void> RenderGraph::execute(VkCommandBuffer cmd)
             m_render_extent = render_extent;
         }
 
+        u32 ts_index = static_cast<u32>(m_pending_pass_names.size());
+        bool do_timestamp = m_timestamp_pool != VK_NULL_HANDLE && ts_index < k_max_timestamp_passes;
+        if (do_timestamp) {
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, m_timestamp_pool, ts_index * 2);
+            m_pending_pass_names.append(pass.name);
+        }
+
         if (pass.execute_callback)
             (*pass.execute_callback)(cmd, *this);
         else
@@ -1783,6 +1821,9 @@ ErrorOr<void> RenderGraph::execute(VkCommandBuffer cmd)
 
         if (has_rendering_attachments)
             vkCmdEndRendering(cmd);
+
+        if (do_timestamp)
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, m_timestamp_pool, ts_index * 2 + 1);
     }
 
     TRY(transition_outputs_for_present(cmd));

@@ -47,6 +47,24 @@ struct CullOverride {
     Mode mode { Mode::Back };
 };
 
+struct Name {
+    String value;
+};
+
+struct Parent {
+    EntityId id { entt::null };
+};
+
+struct ScriptComponent {
+    String module_path;
+    bool enabled { true };
+    Optional<String> entrypoint;
+};
+
+struct ScriptRuntimeHandle {
+    u32 value { 0 };
+};
+
 // Tag components for EnTT
 struct TransformDirty {};
 struct Selected {};

@@ -23,10 +23,7 @@
 #include "../Passes/UIPanelPass.h"
 #include "VulkanDebug.h"
 
-#if defined(TRACY_ENABLE)
-#    include <tracy/Tracy.hpp>
-#    include <tracy/TracyVulkan.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 
 #include "../../Support/MaterialLibrary.h"
 #include "../../Support/MeshLibrary.h"
@@ -1057,12 +1054,70 @@ void VulkanRenderer::set_scene_light(SceneLightData const& l) { if (m_impl) m_im
 VulkanRenderer::SceneLightData VulkanRenderer::scene_light() const { return m_impl ? m_impl->scene_light : SceneLightData {}; }
 void VulkanRenderer::set_shadow_quality(ShadowQuality shadow_quality) { if (m_impl) m_impl->shadow_quality = shadow_quality; }
 VulkanRenderer::ShadowQuality VulkanRenderer::shadow_quality() const { return m_impl ? m_impl->shadow_quality : default_shadow_quality; }
+bool VulkanRenderer::supports_external_image_import() const
+{
+#if defined(USE_VULKAN)
+    return m_context && m_context->supports_external_image_import();
+#else
+    return false;
+#endif
+}
+
+VkDevice VulkanRenderer::vulkan_device() const
+{
+#if defined(USE_VULKAN)
+    return m_context ? m_context->device() : VK_NULL_HANDLE;
+#else
+    return VK_NULL_HANDLE;
+#endif
+}
+u32 VulkanRenderer::last_frame_draw_calls() const
+{
+#if defined(USE_VULKAN)
+    if (!m_impl || !m_impl->geometry_pass)
+        return 0;
+    return static_cast<u32>(m_impl->geometry_pass->draw_groups().size());
+#else
+    return 0;
+#endif
+}
+
+u32 VulkanRenderer::last_frame_triangle_count() const
+{
+#if defined(USE_VULKAN)
+    if (!m_impl || !m_impl->geometry_pass)
+        return 0;
+    u32 total = 0;
+    for (auto const& g : m_impl->geometry_pass->draw_groups())
+        total += (g.vertex_count / 3) * g.instance_count;
+    return total;
+#else
+    return 0;
+#endif
+}
+
+Vector<VulkanRenderer::PassTiming> VulkanRenderer::last_frame_timings() const
+{
+#if defined(USE_VULKAN)
+    if (!m_impl || !m_impl->graph.has_value())
+        return {};
+    Vector<PassTiming> result;
+    for (auto const& t : m_impl->graph->last_frame_timings())
+        result.append({ t.name, t.gpu_ms });
+    return result;
+#else
+    return {};
+#endif
+}
+
 void VulkanRenderer::set_panel_bitmap(Vector<u8> p, u32 w, u32 h) { if (m_impl && m_impl->ui_panel_pass) m_impl->ui_panel_pass->set_panel_bitmap(move(p), w, h); }
 void VulkanRenderer::set_panel_bitmap_view(BitmapView v) { if (m_impl && m_impl->ui_panel_pass) m_impl->ui_panel_pass->set_panel_bitmap_view({ v.bitmap, v.width, v.height }); }
 void VulkanRenderer::clear_panel_bitmap() { if (m_impl && m_impl->ui_panel_pass) m_impl->ui_panel_pass->clear_panel_bitmap(); }
 void VulkanRenderer::set_overlay_view(OverlayView v) { if (m_impl && m_impl->ui_panel_pass) m_impl->ui_panel_pass->set_overlay_view({ move(v.pixels), v.width, v.height }); }
 void VulkanRenderer::set_overlay_bitmap_view(BitmapView v) { if (m_impl && m_impl->ui_panel_pass) m_impl->ui_panel_pass->set_overlay_bitmap_view({ v.bitmap, v.width, v.height }); }
 void VulkanRenderer::clear_overlay_bitmap() { if (m_impl && m_impl->ui_panel_pass) m_impl->ui_panel_pass->clear_overlay_bitmap(); }
+void VulkanRenderer::set_external_overlay_image(VkImage image, u32 w, u32 h) { if (m_impl && m_impl->ui_panel_pass) m_impl->ui_panel_pass->set_external_overlay_image(image, w, h); }
+void VulkanRenderer::clear_external_overlay() { if (m_impl && m_impl->ui_panel_pass) m_impl->ui_panel_pass->clear_external_overlay(); }
 
 } // namespace MyceliumVR
 #endif

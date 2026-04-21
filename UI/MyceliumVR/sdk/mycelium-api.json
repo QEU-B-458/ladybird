@@ -12,24 +12,6 @@
       "args": [{ "name": "message", "type": "string" }]
     },
     {
-      "module": "World",
-      "jsNamespace": "",
-      "name": "spawnEntity",
-      "description": "Create a native ECS entity and return its opaque handle.",
-      "returnType": "EntityId",
-      "hotPath": false,
-      "args": []
-    },
-    {
-      "module": "World",
-      "jsNamespace": "",
-      "name": "destroyEntity",
-      "description": "Destroy a native ECS entity. Returns false for stale or invalid handles.",
-      "returnType": "boolean",
-      "hotPath": false,
-      "args": [{ "name": "entity", "type": "EntityId" }]
-    },
-    {
       "module": "Debug",
       "jsNamespace": "",
       "name": "entityCount",
@@ -48,6 +30,33 @@
       "args": []
     },
     {
+      "module": "World",
+      "jsNamespace": "",
+      "name": "spawnEntity",
+      "description": "Create a native ECS entity and return its opaque handle.",
+      "returnType": "EntityId",
+      "hotPath": false,
+      "args": []
+    },
+    {
+      "module": "World",
+      "jsNamespace": "",
+      "name": "destroyEntity",
+      "description": "Destroy a native ECS entity. Returns false for stale or invalid handles.",
+      "returnType": "boolean",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }]
+    },
+    {
+      "module": "World",
+      "jsNamespace": "",
+      "name": "entityIdAt",
+      "description": "Return the EntityId at a given dense-array index, or null if out of range.",
+      "returnType": "EntityId",
+      "hotPath": false,
+      "args": [{ "name": "index", "type": "number" }]
+    },
+    {
       "module": "Transform",
       "jsNamespace": "",
       "name": "setTransform",
@@ -55,6 +64,15 @@
       "returnType": "boolean",
       "hotPath": true,
       "args": [{ "name": "entity", "type": "EntityId" }, { "name": "px", "type": "number" }, { "name": "py", "type": "number" }, { "name": "pz", "type": "number" }, { "name": "qx", "type": "number" }, { "name": "qy", "type": "number" }, { "name": "qz", "type": "number" }, { "name": "qw", "type": "number" }, { "name": "sx", "type": "number" }, { "name": "sy", "type": "number" }, { "name": "sz", "type": "number" }]
+    },
+    {
+      "module": "Transform",
+      "jsNamespace": "",
+      "name": "getTransform",
+      "description": "Return the current transform of an entity as an object {px,py,pz,qx,qy,qz,qw,sx,sy,sz}, or null.",
+      "returnType": "number",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }]
     },
     {
       "module": "Transform",
@@ -93,6 +111,123 @@
       "args": [{ "name": "entity", "type": "EntityId" }, { "name": "material", "type": "string" }]
     },
     {
+      "module": "Render",
+      "jsNamespace": "",
+      "name": "setNormalMap",
+      "description": "Assign a normal map texture path to an entity.",
+      "returnType": "boolean",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }, { "name": "path", "type": "string" }]
+    },
+    {
+      "module": "Render",
+      "jsNamespace": "",
+      "name": "spawnScene",
+      "description": "Load a glTF asset and spawn one entity per (node × primitive), applying each node's world transform. Returns an Array of EntityId numbers.",
+      "returnType": "number",
+      "hotPath": false,
+      "args": [{ "name": "path", "type": "string" }]
+    },
+    {
+      "module": "Camera",
+      "jsNamespace": "",
+      "name": "setCamera",
+      "description": "Set camera position and Euler orientation (yaw/pitch in degrees).",
+      "returnType": "void",
+      "hotPath": false,
+      "args": [{ "name": "px", "type": "number" }, { "name": "py", "type": "number" }, { "name": "pz", "type": "number" }, { "name": "yaw", "type": "number" }, { "name": "pitch", "type": "number" }]
+    },
+    {
+      "module": "Camera",
+      "jsNamespace": "",
+      "name": "getCamera",
+      "description": "Return current camera state as {px,py,pz,yaw,pitch}, or null if no camera.",
+      "returnType": "number",
+      "hotPath": false,
+      "args": []
+    },
+    {
+      "module": "Lighting",
+      "jsNamespace": "",
+      "name": "setAmbientLight",
+      "description": "Set scene ambient light color and intensity.",
+      "returnType": "void",
+      "hotPath": false,
+      "args": [{ "name": "r", "type": "number" }, { "name": "g", "type": "number" }, { "name": "b", "type": "number" }, { "name": "intensity", "type": "number" }]
+    },
+    {
+      "module": "Lighting",
+      "jsNamespace": "",
+      "name": "setDirectionalLight",
+      "description": "Set scene directional (sun) light direction, color, and intensity.",
+      "returnType": "void",
+      "hotPath": false,
+      "args": [{ "name": "toX", "type": "number" }, { "name": "toY", "type": "number" }, { "name": "toZ", "type": "number" }, { "name": "r", "type": "number" }, { "name": "g", "type": "number" }, { "name": "b", "type": "number" }, { "name": "intensity", "type": "number" }]
+    },
+    {
+      "module": "Lighting",
+      "jsNamespace": "",
+      "name": "setPointLight",
+      "description": "Set a point light by index (0–7): position, color, intensity, radius.",
+      "returnType": "void",
+      "hotPath": false,
+      "args": [{ "name": "index", "type": "number" }, { "name": "x", "type": "number" }, { "name": "y", "type": "number" }, { "name": "z", "type": "number" }, { "name": "r", "type": "number" }, { "name": "g", "type": "number" }, { "name": "b", "type": "number" }, { "name": "intensity", "type": "number" }, { "name": "radius", "type": "number" }]
+    },
+    {
+      "module": "Lighting",
+      "jsNamespace": "",
+      "name": "setSpotLight",
+      "description": "Set a spot light by index (0–7): position, direction, cone angles, color, intensity, radius.",
+      "returnType": "void",
+      "hotPath": false,
+      "args": [{ "name": "index", "type": "number" }, { "name": "x", "type": "number" }, { "name": "y", "type": "number" }, { "name": "z", "type": "number" }, { "name": "dirX", "type": "number" }, { "name": "dirY", "type": "number" }, { "name": "dirZ", "type": "number" }, { "name": "innerDeg", "type": "number" }, { "name": "outerDeg", "type": "number" }, { "name": "r", "type": "number" }, { "name": "g", "type": "number" }, { "name": "b", "type": "number" }, { "name": "intensity", "type": "number" }, { "name": "radius", "type": "number" }]
+    },
+    {
+      "module": "Lighting",
+      "jsNamespace": "",
+      "name": "clearPointLights",
+      "description": "Remove all active point and spot lights from the scene.",
+      "returnType": "void",
+      "hotPath": false,
+      "args": []
+    },
+    {
+      "module": "Lighting",
+      "jsNamespace": "",
+      "name": "getSceneLight",
+      "description": "Return current scene light state as an object, or null if not set.",
+      "returnType": "number",
+      "hotPath": false,
+      "args": []
+    },
+    {
+      "module": "World",
+      "jsNamespace": "",
+      "name": "getEntityComponents",
+      "description": "Return an object with all live component data for an entity: transform, meshRenderer, panel, cullOverride, tags. Returns null for invalid entities.",
+      "returnType": "number",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }]
+    },
+    {
+      "module": "World",
+      "jsNamespace": "",
+      "name": "getEntityHierarchy",
+      "description": "Return an array of all live entities with name, kind, parent, alpha mode, and static flag.",
+      "returnType": "number",
+      "hotPath": false,
+      "args": []
+    },
+    {
+      "module": "World",
+      "jsNamespace": "",
+      "name": "setSelectedEntity",
+      "description": "Set the selected entity by ID, clearing any previous selection. Fires __myceliumSelectionChanged in the overlay.",
+      "returnType": "void",
+      "hotPath": false,
+      "args": [{ "name": "entity", "type": "EntityId" }]
+    },
+    {
       "module": "Panel",
       "jsNamespace": "",
       "name": "createPanel",
@@ -100,33 +235,6 @@
       "returnType": "boolean",
       "hotPath": false,
       "args": [{ "name": "entity", "type": "EntityId" }, { "name": "url", "type": "string" }, { "name": "width", "type": "number" }, { "name": "height", "type": "number" }]
-    },
-    {
-      "module": "FileSystem",
-      "jsNamespace": "fs",
-      "name": "readText",
-      "description": "Read a UTF-8 text file from a mounted Mycelium virtual filesystem path.",
-      "returnType": "string",
-      "hotPath": false,
-      "args": [{ "name": "path", "type": "string" }]
-    },
-    {
-      "module": "FileSystem",
-      "jsNamespace": "fs",
-      "name": "exists",
-      "description": "Return true if a mounted Mycelium virtual filesystem path exists.",
-      "returnType": "boolean",
-      "hotPath": false,
-      "args": [{ "name": "path", "type": "string" }]
-    },
-    {
-      "module": "FileSystem",
-      "jsNamespace": "fs",
-      "name": "writeText",
-      "description": "Write UTF-8 text to a mounted writable Mycelium virtual filesystem path.",
-      "returnType": "boolean",
-      "hotPath": false,
-      "args": [{ "name": "path", "type": "string" }, { "name": "text", "type": "string" }]
     }
   ]
 }

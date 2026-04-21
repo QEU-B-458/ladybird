@@ -6,9 +6,7 @@
 #include "TextureLibrary.h"
 #include "../Backend/VulkanResourceManager.h"
 
-#if defined(TRACY_ENABLE)
-#    include <tracy/Tracy.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 
 #include "../../Support/VirtualFileSystem.h"
 #include <AK/ByteBuffer.h>

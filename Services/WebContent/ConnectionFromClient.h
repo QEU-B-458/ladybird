@@ -43,6 +43,7 @@ public:
     virtual void die() override;
 
     void request_file(u64 page_id, Web::FileRequest);
+    bool client_supports_vulkan_external_images() const { return m_client_supports_vulkan_external_images; }
 
     PageHost& page_host() { return *m_page_host; }
     PageHost const& page_host() const { return *m_page_host; }
@@ -60,6 +61,7 @@ private:
 
     virtual Messages::WebContentServer::InitTransportResponse init_transport(int peer_pid) override;
     virtual void close_server() override;
+    virtual void set_use_vulkan_external_images(bool supported) override;
     virtual Messages::WebContentServer::GetWindowHandleResponse get_window_handle(u64 page_id) override;
     virtual void set_window_handle(u64 page_id, String handle) override;
     virtual void connect_to_webdriver(u64 page_id, ByteString webdriver_endpoint) override;
@@ -180,6 +182,8 @@ private:
     void enqueue_input_event(Web::QueuedInputEvent);
 
     Queue<Web::QueuedInputEvent> m_input_event_queue;
+
+    bool m_client_supports_vulkan_external_images { false };
 };
 
 }

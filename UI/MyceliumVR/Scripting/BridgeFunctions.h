@@ -42,7 +42,8 @@ void bind_all(
     JS::Object& mycelium,
     JS::Object& api,
     JS::Object& fs,
-    JS::Object& input);
+    JS::Object& input,
+    JS::Object& net);
 
 } // namespace BridgeFunctions
 

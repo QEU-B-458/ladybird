@@ -10,9 +10,7 @@
 #include "VulkanSwapchain.h"
 #include <AK/NonnullOwnPtr.h>
 
-#if defined(TRACY_ENABLE)
-#    include <tracy/TracyVulkan.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 
 namespace MyceliumVR {
 

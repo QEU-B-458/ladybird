@@ -7,9 +7,7 @@
 
 #include <entt/meta/factory.hpp>
 
-#if defined(TRACY_ENABLE)
-#    include <tracy/Tracy.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 
 namespace MyceliumVR {
 
@@ -34,6 +32,17 @@ void World::register_meta()
         .data<&Panel::url>("url"_hs)
         .data<&Panel::width>("width"_hs)
         .data<&Panel::height>("height"_hs);
+
+    entt::meta_factory<Name>{}.type("Name"_hs).data<&Name::value>("value"_hs);
+    entt::meta_factory<Parent>{}.type("Parent"_hs).data<&Parent::id>("id"_hs);
+    
+    entt::meta_factory<ScriptComponent>{}.type("ScriptComponent"_hs)
+        .data<&ScriptComponent::module_path>("module_path"_hs)
+        .data<&ScriptComponent::enabled>("enabled"_hs)
+        .data<&ScriptComponent::entrypoint>("entrypoint"_hs);
+
+    entt::meta_factory<ScriptRuntimeHandle>{}.type("ScriptRuntimeHandle"_hs)
+        .data<&ScriptRuntimeHandle::value>("value"_hs);
 
     entt::meta_factory<TransformDirty>{}.type("TransformDirty"_hs);
     entt::meta_factory<Selected>{}.type("Selected"_hs);

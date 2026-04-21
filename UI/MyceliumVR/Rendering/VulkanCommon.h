@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "../World/WorldRuntimeHost.h"
+
 #include <AK/Array.h>
 #include <AK/Error.h>
 #include <AK/Format.h>
@@ -114,8 +116,6 @@ static constexpr int ClusterGridY = 9;
 static constexpr int ClusterGridZ = 24;
 static constexpr int ClusterTotal = ClusterGridX * ClusterGridY * ClusterGridZ; // 3456
 static constexpr int MaxLightsPerCluster = 32;
-static constexpr int MaxPointLights = 64;
-
 struct GPUPointLight {
     float position_radius[4] {};
     float color_intensity[4] {};
@@ -197,35 +197,6 @@ static inline VkFormat find_depth_format(VkPhysicalDevice pd) {
     }
     return VK_FORMAT_D32_SFLOAT;
 }
-
-struct CameraState {
-    float position[3] { 0.0f, 0.0f, 6.0f };
-    float yaw_degrees { 0.0f };
-    float pitch_degrees { 0.0f };
-};
-
-struct SceneLightData {
-    float ambient_rgb[3] { 0.15f, 0.18f, 0.25f };
-    float ambient_intensity { 1.0f };
-    float light_to_xyz[3] { 0.408f, 0.816f, 0.408f };
-    float light_intensity { 1.0f };
-    float light_rgb[3] { 1.0f, 0.93f, 0.80f };
-
-    struct PointLight {
-        float position[3] {};
-        float radius { 5.0f };
-        float color[3] { 1.0f, 1.0f, 1.0f };
-        float intensity { 1.0f };
-        float direction[3] {};
-        float unused0 { 0.0f };
-        float cone_inner_cos { 1.0f };
-        float cone_outer_cos { 1.0f };
-        int   type { 0 };
-        float unused1 { 0.0f };
-    };
-    PointLight point_lights[MaxPointLights] {}; // MaxPointLights = 64 (global constant)
-    int point_light_count { 0 };
-};
 
 static inline Mat4 make_view_matrix(CameraState const& camera_state)
 {

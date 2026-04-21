@@ -13,6 +13,7 @@
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/ShareableBitmap.h>
 #include <LibHTTP/Cookie/ParsedCookie.h>
+#include <LibIPC/File.h>
 #include <LibIPC/TransportHandle.h>
 #include <LibJS/Console.h>
 #include <LibJS/Runtime/ConsoleObject.h>
@@ -729,6 +730,19 @@ void PageClient::page_did_change_audio_play_state(Web::HTML::AudioPlayState play
 void PageClient::page_did_allocate_backing_stores(i32 front_bitmap_id, Gfx::SharedImage front_backing_store, i32 back_bitmap_id, Gfx::SharedImage back_backing_store)
 {
     client().async_did_allocate_backing_stores(m_id, front_bitmap_id, move(front_backing_store), back_bitmap_id, move(back_backing_store));
+}
+
+bool PageClient::client_supports_vulkan_external_images() const
+{
+    return client().client_supports_vulkan_external_images();
+}
+
+void PageClient::page_did_allocate_vulkan_backing_stores(i32 front_image_id, int front_fd, u64 front_allocation_size, u32 front_memory_type_index, u32 front_format, u32 front_width, u32 front_height, i32 back_image_id, int back_fd, u64 back_allocation_size, u32 back_memory_type_index, u32 back_format, u32 back_width, u32 back_height)
+{
+    client().async_did_allocate_vulkan_backing_stores(
+        m_id,
+        front_image_id, IPC::File::adopt_fd(front_fd), front_allocation_size, front_memory_type_index, front_format, front_width, front_height,
+        back_image_id, IPC::File::adopt_fd(back_fd), back_allocation_size, back_memory_type_index, back_format, back_width, back_height);
 }
 
 Web::PageClient::WorkerAgentResponse PageClient::request_worker_agent(Web::Bindings::AgentType type)

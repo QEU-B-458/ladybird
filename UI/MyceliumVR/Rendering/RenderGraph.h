@@ -9,9 +9,7 @@
 #include "Backend/VulkanContext.h"
 #include "Backend/VulkanResourceManager.h"
 
-#if defined(TRACY_ENABLE)
-#    include <tracy/TracyVulkan.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 
 #include <AK/Function.h>
 #include <AK/HashTable.h>
@@ -338,6 +336,11 @@ public:
         SubmissionPlan submission_plan;
     };
 
+    struct PassTiming {
+        String name;
+        double gpu_ms { 0.0 };
+    };
+
     explicit RenderGraph(VulkanContext& ctx);
     ~RenderGraph();
 
@@ -359,6 +362,7 @@ public:
     TracyVkCtx tracy_context() const { return m_tracy_vk_ctx; }
 #endif
     CompiledGraph const& compiled_graph() const { return m_compiled_graph; }
+    Vector<PassTiming> const& last_frame_timings() const { return m_last_frame_timings; }
     String debug_description() const;
 
     VkImage get_image(ResourceHandle handle) const;
@@ -502,7 +506,12 @@ private:
     ResourceNode& resource(ResourceHandle handle);
     ResourceNode const& resource(ResourceHandle handle) const;
 
+    static constexpr u32 k_max_timestamp_passes = 64;
+
     VulkanContext& m_context;
+    VkQueryPool m_timestamp_pool { VK_NULL_HANDLE };
+    Vector<String> m_pending_pass_names; // names recorded this frame, in order
+    Vector<PassTiming> m_last_frame_timings;
     Vector<RenderGraphPass*> m_passes;
     Vector<PassNode> m_pass_nodes;
     Vector<ResourceNode> m_resources;

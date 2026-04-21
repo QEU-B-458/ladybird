@@ -22,6 +22,15 @@
 #    include <gpu/ganesh/vk/GrVkTypes.h>
 #endif
 
+#ifdef USE_VULKAN
+#    include <LibGfx/ExternalVulkanImage.h>
+#    ifndef USE_VULKAN_IMAGES
+// Already included above when USE_VULKAN_IMAGES is defined.
+#        include <gpu/ganesh/vk/GrVkBackendSurface.h>
+#        include <gpu/ganesh/vk/GrVkTypes.h>
+#    endif
+#endif
+
 namespace Gfx {
 
 struct PaintingSurface::Impl {
@@ -91,6 +100,49 @@ NonnullRefPtr<PaintingSurface> PaintingSurface::create_from_vkimage(NonnullRefPt
     vulkan_image->ref();
     sk_sp<SkSurface> surface = SkSurfaces::WrapBackendRenderTarget(context->sk_context(), rt, origin_to_sk_origin(origin), vk_format_to_sk_color_type(vulkan_image->info.format),
         nullptr, nullptr, release_vulkan_image, vulkan_image.ptr());
+    return adopt_ref(*new PaintingSurface(make<Impl>(context, size, surface, nullptr)));
+}
+#endif
+
+#ifdef USE_VULKAN
+static void release_exportable_vulkan_image(void* context)
+{
+    static_cast<ExportableVulkanImage*>(context)->unref();
+}
+
+ErrorOr<NonnullRefPtr<PaintingSurface>> PaintingSurface::create_from_exportable_vulkan_image(NonnullRefPtr<SkiaBackendContext> context, NonnullRefPtr<ExportableVulkanImage> image)
+{
+    context->lock();
+    ScopeGuard unlock_guard([&context] { context->unlock(); });
+
+    IntSize size(static_cast<int>(image->width()), static_cast<int>(image->height()));
+    GrVkImageInfo info = {
+        .fImage = image->image(),
+        .fAlloc = {},
+        .fImageTiling = VK_IMAGE_TILING_OPTIMAL,
+        .fImageLayout = image->layout(),
+        .fFormat = image->format(),
+        // Must match the actual creation flags — Skia validates these internally.
+        .fImageUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .fSampleCount = 1,
+        .fLevelCount = 1,
+        // Must be the real queue family, not IGNORED. The image is on the same
+        // queue family Skia uses; IGNORED causes Skia to attempt an ownership
+        // transfer from VK_QUEUE_FAMILY_EXTERNAL which fails on exclusive images.
+        .fCurrentQueueFamily = context->vulkan_context().graphics_queue_family,
+        .fProtected = skgpu::Protected::kNo,
+        .fYcbcrConversionInfo = {},
+        .fSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    GrBackendRenderTarget rt = GrBackendRenderTargets::MakeVk(size.width(), size.height(), info);
+    image->ref();
+    sk_sp<SkSurface> surface = SkSurfaces::WrapBackendRenderTarget(
+        context->sk_context(), rt, kTopLeft_GrSurfaceOrigin, kBGRA_8888_SkColorType,
+        nullptr, nullptr, release_exportable_vulkan_image, image.ptr());
+    if (!surface) {
+        image->unref();
+        return Error::from_string_literal("PaintingSurface::create_from_exportable_vulkan_image: WrapBackendRenderTarget failed");
+    }
     return adopt_ref(*new PaintingSurface(make<Impl>(context, size, surface, nullptr)));
 }
 #endif

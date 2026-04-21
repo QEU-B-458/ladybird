@@ -443,6 +443,10 @@ public:
     virtual void page_did_close_top_level_traversable() { }
     virtual void page_did_update_navigation_buttons_state([[maybe_unused]] bool back_enabled, [[maybe_unused]] bool forward_enabled) { }
     virtual void page_did_allocate_backing_stores([[maybe_unused]] i32 front_bitmap_id, [[maybe_unused]] Gfx::SharedImage front_backing_store, [[maybe_unused]] i32 back_bitmap_id, [[maybe_unused]] Gfx::SharedImage back_backing_store) { }
+    // Called when Vulkan external-memory backing stores are allocated (zero-copy path).
+    // Passes raw fd/HANDLE values so LibWeb stays free of Vulkan types.
+    virtual bool client_supports_vulkan_external_images() const { return false; }
+    virtual void page_did_allocate_vulkan_backing_stores([[maybe_unused]] i32 front_image_id, [[maybe_unused]] int front_fd, [[maybe_unused]] u64 front_allocation_size, [[maybe_unused]] u32 front_memory_type_index, [[maybe_unused]] u32 front_format, [[maybe_unused]] u32 front_width, [[maybe_unused]] u32 front_height, [[maybe_unused]] i32 back_image_id, [[maybe_unused]] int back_fd, [[maybe_unused]] u64 back_allocation_size, [[maybe_unused]] u32 back_memory_type_index, [[maybe_unused]] u32 back_format, [[maybe_unused]] u32 back_width, [[maybe_unused]] u32 back_height) { }
 
     virtual void request_file(FileRequest) = 0;
 

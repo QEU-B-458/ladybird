@@ -1,97 +1,29 @@
 <!doctype html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MyceliumVR Overlay</title>
-    <style>
-        :root {
-            color-scheme: dark;
-            --panel: rgba(10, 16, 20, 0.78);
-            --border: rgba(145, 225, 255, 0.28);
-            --text: #effafc;
-            --muted: #98b7be;
-            --accent: #7ee4ff;
-        }
-
-        html, body {
-            margin: 0;
-            width: 100%;
-            height: 100%;
-            background: transparent;
-            overflow: hidden;
-            font-family: "Iosevka Term", "IBM Plex Sans", sans-serif;
-            color: var(--text);
-        }
-
-        body {
-            display: flex;
-            align-items: flex-start;
-            justify-content: flex-start;
-            padding: 18px;
-            box-sizing: border-box;
-        }
-
-        .hud {
-            box-sizing: border-box;
-            width: 336px;
-            min-height: 152px;
-            margin: 0;
-            padding: 14px 16px;
-            background: linear-gradient(180deg, rgba(15, 22, 28, 0.92), var(--panel));
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
-        }
-
-        h1 {
-            margin: 0 0 10px;
-            font-size: 17px;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: var(--accent);
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: auto auto;
-            gap: 4px 14px;
-            font-size: 13px;
-        }
-
-        .label {
-            color: var(--muted);
-        }
-
-        .footer {
-            margin-top: 10px;
-            font-size: 11px;
-            color: var(--muted);
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyceliumVR</title>
+  <link rel="stylesheet" href="lib/styles.css">
+  <script src="lib/logger.js"></script>
 </head>
 <body>
-    <section class="hud">
-        <h1>MyceliumVR</h1>
-        <div class="grid">
-            <div class="label">FPS</div><div id="fps">0.0</div>
-            <div class="label">Frame ms</div><div id="frame-ms">0.00</div>
-            <div class="label">Entities</div><div id="entity-count">0</div>
-            <div class="label">Camera</div><div id="camera-pos">0.00, 0.00, 0.00</div>
-            <div class="label">Angles</div><div id="camera-angles">0.0 / 0.0</div>
-            <div class="label">Overlay</div><div id="overlay-focus">Passive</div>
-        </div>
-        <div class="footer">F1 toggle overlay, F2 toggle UI focus</div>
-    </section>
-    <script>
-        window.__myceliumOverlayUpdate = (fps, frameTimeMs, entityCount, cameraX, cameraY, cameraZ, cameraYaw, cameraPitch, overlayFocused) => {
-            document.getElementById("fps").textContent = fps.toFixed(1);
-            document.getElementById("frame-ms").textContent = frameTimeMs.toFixed(2);
-            document.getElementById("entity-count").textContent = String(entityCount);
-            document.getElementById("camera-pos").textContent = `${cameraX.toFixed(2)}, ${cameraY.toFixed(2)}, ${cameraZ.toFixed(2)}`;
-            document.getElementById("camera-angles").textContent = `${cameraYaw.toFixed(1)} / ${cameraPitch.toFixed(1)}`;
-            document.getElementById("overlay-focus").textContent = overlayFocused ? "Focused" : "Passive";
-        };
-    </script>
+  <div id="root"></div>
+
+  <script src="lib/data.js"></script>
+  <script src="lib/state.js"></script>
+  <script src="lib/icons.js"></script>
+  <script src="lib/tweaks.js"></script>
+  <script src="lib/stats.js"></script>
+  <script src="lib/hierarchy.js"></script>
+  <script src="lib/inspector.js"></script>
+  <script src="lib/console.js"></script>
+  <script src="lib/viewport.js"></script>
+  <script src="lib/topbar.js"></script>
+  <script src="lib/statusbar.js"></script>
+  <script src="lib/tweaks-panel.js"></script>
+  <script src="lib/events.js"></script>
+  <script src="lib/bridge.js"></script>
+  <script src="main.js"></script>
 </body>
 </html>

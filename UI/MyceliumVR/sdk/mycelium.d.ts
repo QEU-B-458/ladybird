@@ -23,17 +23,6 @@ export interface MyceliumApi {
 }
 
 export interface MyceliumFileSystem {
-  /** Read a UTF-8 text file from a mounted Mycelium virtual filesystem path. */
-  /** Throws: Error for missing mounts, missing files, or invalid UTF-8. */
-  readText(path: string): string;
-
-  /** Return true if a mounted Mycelium virtual filesystem path exists. */
-  exists(path: string): boolean;
-
-  /** Write UTF-8 text to a mounted writable Mycelium virtual filesystem path. */
-  /** Throws: TypeError for read-only mounts, missing mounts, or write failures. */
-  writeText(path: string, text: string): boolean;
-
 }
 
 export interface MyceliumNative {
@@ -44,21 +33,28 @@ export interface MyceliumNative {
   /** Write a message to the native MyceliumVR log. */
   log(message: string): void;
 
-  /** Create a native ECS entity and return its opaque handle. */
-  spawnEntity(): EntityId;
-
-  /** Destroy a native ECS entity. Returns false for stale or invalid handles. */
-  destroyEntity(entity: EntityId): boolean;
-
   /** Return the number of live native ECS entities. */
   entityCount(): number;
 
   /** Return the number of live entities with dirty transforms. */
   dirtyTransformCount(): number;
 
+  /** Create a native ECS entity and return its opaque handle. */
+  spawnEntity(): EntityId;
+
+  /** Destroy a native ECS entity. Returns false for stale or invalid handles. */
+  destroyEntity(entity: EntityId): boolean;
+
+  /** Return the EntityId at a given dense-array index, or null if out of range. */
+  entityIdAt(index: number): EntityId;
+
   /** Write a transform directly into native ECS storage. */
   /** Throws: RangeError for invalid EntityId. */
   setTransform(entity: EntityId, px: number, py: number, pz: number, qx: number, qy: number, qz: number, qw: number, sx: number, sy: number, sz: number): boolean;
+
+  /** Return the current transform of an entity as an object {px,py,pz,qx,qy,qz,qw,sx,sy,sz}, or null. */
+  /** Throws: RangeError for invalid EntityId. */
+  getTransform(entity: EntityId): number;
 
   /** Acquire a Float32Array for bulk transform writes. */
   /** Throws: RangeError for invalid capacity. */
@@ -76,31 +72,50 @@ export interface MyceliumNative {
   /** Throws: RangeError for invalid EntityId. */
   setMaterial(entity: EntityId, material: string): boolean;
 
+  /** Assign a normal map texture path to an entity. */
+  /** Throws: RangeError for invalid EntityId. */
+  setNormalMap(entity: EntityId, path: string): boolean;
+
+  /** Load a glTF asset and spawn one entity per (node × primitive), applying each node's world transform. Returns an Array of EntityId numbers. */
+  /** Throws: Error if the scene fails to load or no VFS is available. */
+  spawnScene(path: string): number;
+
+  /** Set camera position and Euler orientation (yaw/pitch in degrees). */
+  setCamera(px: number, py: number, pz: number, yaw: number, pitch: number): void;
+
+  /** Return current camera state as {px,py,pz,yaw,pitch}, or null if no camera. */
+  getCamera(): number;
+
+  /** Set scene ambient light color and intensity. */
+  setAmbientLight(r: number, g: number, b: number, intensity: number): void;
+
+  /** Set scene directional (sun) light direction, color, and intensity. */
+  setDirectionalLight(toX: number, toY: number, toZ: number, r: number, g: number, b: number, intensity: number): void;
+
+  /** Set a point light by index (0–7): position, color, intensity, radius. */
+  setPointLight(index: number, x: number, y: number, z: number, r: number, g: number, b: number, intensity: number, radius: number): void;
+
+  /** Set a spot light by index (0–7): position, direction, cone angles, color, intensity, radius. */
+  setSpotLight(index: number, x: number, y: number, z: number, dirX: number, dirY: number, dirZ: number, innerDeg: number, outerDeg: number, r: number, g: number, b: number, intensity: number, radius: number): void;
+
+  /** Remove all active point and spot lights from the scene. */
+  clearPointLights(): void;
+
+  /** Return current scene light state as an object, or null if not set. */
+  getSceneLight(): number;
+
+  /** Return an object with all live component data for an entity: transform, meshRenderer, panel, cullOverride, tags. Returns null for invalid entities. */
+  getEntityComponents(entity: EntityId): number;
+
+  /** Return an array of all live entities with name, kind, parent, alpha mode, and static flag. */
+  getEntityHierarchy(): number;
+
+  /** Set the selected entity by ID, clearing any previous selection. Fires __myceliumSelectionChanged in the overlay. */
+  setSelectedEntity(entity: EntityId): void;
+
   /** Attach a WebContent panel definition to an entity. */
   /** Throws: RangeError for invalid EntityId. */
   createPanel(entity: EntityId, url: string, width: number, height: number): boolean;
-
-  /**
-   * Set the scene ambient light color and intensity.
-   * Affects all mesh entities via the lighting shader.
-   */
-  setAmbientLight(r: number, g: number, b: number, intensity: number): void;
-
-  /**
-   * Set the scene directional light.
-   * toX/toY/toZ is the direction *toward* the light source (normalized by the shader).
-   * r/g/b is the light color; intensity scales it.
-   */
-  setDirectionalLight(toX: number, toY: number, toZ: number, r: number, g: number, b: number, intensity: number): void;
-
-  /**
-   * Return the current scene light state, or null if no renderer is available.
-   */
-  getSceneLight(): {
-    ambientR: number; ambientG: number; ambientB: number; ambientIntensity: number;
-    lightToX: number; lightToY: number; lightToZ: number; lightIntensity: number;
-    lightR: number; lightG: number; lightB: number;
-  } | null;
 
 }
 

@@ -1,0 +1,6 @@
+#include <AK/String.h>
+
+endpoint WorldWorker
+{
+    ping(u64 time_ms) => (u64 time_ms)
+}

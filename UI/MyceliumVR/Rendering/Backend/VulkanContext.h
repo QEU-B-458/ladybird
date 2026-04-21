@@ -28,6 +28,8 @@ public:
     u32 graphics_queue_family() const { return m_graphics_queue_family; }
     VmaAllocator allocator() const { return m_allocator; }
     bool supports_multi_draw_indirect() const { return m_supports_multi_draw_indirect; }
+    bool supports_external_image_import() const { return m_supports_external_image_import; }
+    float timestamp_period() const { return m_timestamp_period; }
 
 private:
     VulkanContext() = default;
@@ -41,6 +43,8 @@ private:
     u32 m_graphics_queue_family { 0 };
     VmaAllocator m_allocator { VK_NULL_HANDLE };
     bool m_supports_multi_draw_indirect { false };
+    bool m_supports_external_image_import { false };
+    float m_timestamp_period { 1.0f };
 
     VkDebugUtilsMessengerEXT m_debug_messenger { VK_NULL_HANDLE };
 };

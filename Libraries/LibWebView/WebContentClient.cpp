@@ -773,6 +773,12 @@ void WebContentClient::did_allocate_backing_stores(u64 page_id, i32 front_bitmap
         view->did_allocate_backing_stores({}, front_bitmap_id, move(front_backing_store), back_bitmap_id, move(back_backing_store));
 }
 
+void WebContentClient::did_allocate_vulkan_backing_stores(u64 page_id, i32 front_image_id, IPC::File front_fd, u64 front_allocation_size, u32 front_memory_type_index, u32 front_format, u32 front_width, u32 front_height, i32 back_image_id, IPC::File back_fd, u64 back_allocation_size, u32 back_memory_type_index, u32 back_format, u32 back_width, u32 back_height)
+{
+    if (auto view = view_for_page_id(page_id); view.has_value())
+        view->did_allocate_vulkan_backing_stores({}, front_image_id, move(front_fd), front_allocation_size, front_memory_type_index, front_format, front_width, front_height, back_image_id, move(back_fd), back_allocation_size, back_memory_type_index, back_format, back_width, back_height);
+}
+
 Messages::WebContentClient::RequestWorkerAgentResponse WebContentClient::request_worker_agent(u64 page_id, Web::Bindings::AgentType worker_type)
 {
     if (auto view = view_for_page_id(page_id); view.has_value()) {

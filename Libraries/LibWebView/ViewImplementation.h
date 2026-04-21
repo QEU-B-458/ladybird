@@ -17,6 +17,7 @@
 #include <AK/Utf16String.h>
 #include <LibCore/Forward.h>
 #include <LibCore/Promise.h>
+#include <LibIPC/File.h>
 #include <LibCore/SharedVersion.h>
 #include <LibGfx/Cursor.h>
 #include <LibGfx/Forward.h>
@@ -167,6 +168,7 @@ public:
     void did_update_navigation_buttons_state(Badge<WebContentClient>, bool back_enabled, bool forward_enabled) const;
 
     void did_allocate_backing_stores(Badge<WebContentClient>, i32 front_bitmap_id, Gfx::SharedImage front_backing_store, i32 back_bitmap_id, Gfx::SharedImage back_backing_store);
+    virtual void did_allocate_vulkan_backing_stores(Badge<WebContentClient>, i32 front_image_id, IPC::File front_fd, u64 front_allocation_size, u32 front_memory_type_index, u32 front_format, u32 front_width, u32 front_height, i32 back_image_id, IPC::File back_fd, u64 back_allocation_size, u32 back_memory_type_index, u32 back_format, u32 back_width, u32 back_height) { (void)front_image_id; (void)front_fd; (void)front_allocation_size; (void)front_memory_type_index; (void)front_format; (void)front_width; (void)front_height; (void)back_image_id; (void)back_fd; (void)back_allocation_size; (void)back_memory_type_index; (void)back_format; (void)back_width; (void)back_height; }
 
     enum class ScreenshotType {
         Visible,

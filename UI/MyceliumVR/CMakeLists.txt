@@ -17,6 +17,8 @@ add_executable(ladybird
     Rendering/Renderer.cpp
     Rendering/Web/OverlayManager.h
     Rendering/Web/OverlayManager.cpp
+    Rendering/Web/UIOverlayBroker.h
+    Rendering/Web/UIOverlayBroker.cpp
     Rendering/Backend/VulkanProbe.h
     Rendering/Backend/VulkanProbe.cpp
     Rendering/Pipeline/TextureLibrary.h
@@ -65,10 +67,27 @@ add_executable(ladybird
     Scripting/BridgeFunctions.cpp
     Scripting/BridgeRegistry.h
     Scripting/BridgeRegistry.cpp
+    IPC/IpcProtocol.cpp
+    IPC/IpcProtocol.h
+    IPC/IpcTransport.h
+    IPC/TcpLoopbackTransport.cpp
+    IPC/TcpLoopbackTransport.h
+    IPC/LocalIpcTransport.cpp
+    IPC/LocalIpcTransport.h
+    IPC/SupervisorClient.cpp
+    IPC/SupervisorClient.h
+    IPC/WorldWorkerClient.cpp
+    IPC/WorldWorkerClient.h
+    Supervisor/Supervisor.h
+    Supervisor/Supervisor.cpp
     Scripting/SDKGenerator.h
     Scripting/SDKGenerator.cpp
+    Scripting/ScriptHost.h
+    Scripting/ScriptHost.cpp
     Scripting/ScriptRuntime.h
     Scripting/ScriptRuntime.cpp
+    Scripting/WasmRuntime.h
+    Scripting/WasmRuntime.cpp
     Support/ShaderCompiler.h
     Support/ShaderCompiler.cpp
     Support/GltfLoader.h
@@ -81,13 +100,31 @@ add_executable(ladybird
     Support/InputState.cpp
     Support/VirtualFileSystem.h
     Support/VirtualFileSystem.cpp
+    Networking/NetworkService.h
+    Networking/NetworkService.cpp
+    Networking/ControlBusServer.h
+    Networking/ControlBusServer.cpp
+    Networking/WebSocketTransport.h
+    Networking/WebSocketTransport.cpp
+    World/WorldRuntimeHost.h
+    World/ProcessLocalWorldRuntimeHost.h
+    World/ProcessLocalWorldRuntimeHost.cpp
     World/Session.h
     World/Session.cpp
+    World/WorldManagementSystem.h
+    World/WorldManagementSystem.cpp
     World/WorldManifest.h
     World/WorldManifest.cpp
+    World/WorldRuntime.h
+    World/WorldRuntime.cpp
     World/World.h
     World/World.cpp
+    "${CMAKE_CURRENT_BINARY_DIR}/WorldWorkerEndpoint.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/SupervisorEndpoint.h"
 )
+
+compile_ipc(IPC/WorldWorker.ipc "${CMAKE_CURRENT_BINARY_DIR}/WorldWorkerEndpoint.h")
+compile_ipc(IPC/Supervisor.ipc "${CMAKE_CURRENT_BINARY_DIR}/SupervisorEndpoint.h")
 
 set_source_files_properties(
     Rendering/Renderer.cpp
@@ -149,6 +186,8 @@ target_link_libraries(ladybird PRIVATE
     GPUOpen::VulkanMemoryAllocator
     SDL3::SDL3
     LibCrypto
+    LibWasm
+    LibWebSocket
     LibWebView
     LibWeb
     LibGfx
@@ -199,6 +238,22 @@ endif()
 
 target_include_directories(ladybird PRIVATE
     ${LADYBIRD_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+option(MYCELIUMVR_DEBUG_SYMBOLS "Build MyceliumVR engine with debug info against release Lagom" OFF)
+if(MYCELIUMVR_DEBUG_SYMBOLS)
+    # Strip the config's -O flags from this target, then apply our own.
+    # target_compile_options appends, so -O1 would win over -O2 on GCC/Clang
+    # (last flag wins), but explicitly removing them is cleaner.
+    get_target_property(_ladybird_opts ladybird COMPILE_OPTIONS)
+    if(_ladybird_opts)
+        list(FILTER _ladybird_opts EXCLUDE REGEX "^-O[0-9s]$")
+        set_target_properties(ladybird PROPERTIES COMPILE_OPTIONS "${_ladybird_opts}")
+    endif()
+    target_compile_options(ladybird PRIVATE -O1 -g3 -fno-omit-frame-pointer)
+    target_compile_definitions(ladybird PRIVATE MYCELIUMVR_DEBUG=1)
+    message(STATUS "MyceliumVR: debug symbols enabled (-O1 -g3), Lagom stays RelWithDebInfo")
+endif()
 
 create_ladybird_bundle(ladybird)

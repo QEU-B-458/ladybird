@@ -53,7 +53,7 @@ private:
         args_parser.add_option(m_script_path_argument, "JavaScript runtime script to load", "script", 0, "path");
         args_parser.add_option(m_world_path_argument, "Loose folder world to mount by package name, e.g. world://example/", "world", 0, "path");
         args_parser.add_option(m_shadow_quality_argument, "Shadow quality level from 0 to 9 (0 = off, 1 = 1x1, 2 = 3x3, 3 = 5x5, ...)", "shadow-quality", 0, "level");
-        args_parser.add_option(m_generate_sdk_argument, "Generate SDK files and exit (all, typescript, javascript, wasm, json)", "generate-sdk", 0, "target");
+        args_parser.add_option(m_generate_sdk_argument, "Generate SDK files and exit (all, typescript, assemblyscript, javascript, wasm, json)", "generate-sdk", 0, "target");
         args_parser.add_option(m_sdk_output_argument, "Output directory for generated SDK files", "sdk-output", 0, "path");
     }
 

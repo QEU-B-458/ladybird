@@ -63,6 +63,11 @@ public:
     void set_overlay_view(OverlayView view);
     void set_overlay_bitmap_view(BitmapView view);
     void clear_overlay_bitmap();
+
+    // Zero-copy Vulkan path: set a pre-rendered VkImage from WebContent instead of a CPU bitmap.
+    // The image is owned by WebContentView; UIPanelPass only borrows it per-frame.
+    void set_external_overlay_image(VkImage image, u32 width, u32 height);
+    void clear_external_overlay();
     void set_graph_bindings(GraphBindings bindings) { m_graph_bindings = bindings; }
     VulkanBuffer const& panel_vertex_buffer() const { return m_panel_vertex_buffer; }
     VulkanBuffer const& overlay_vertex_buffer() const { return m_overlay_vertex_buffer; }
@@ -118,6 +123,18 @@ private:
     u32 m_panel_height { 0 };
     OverlayView m_overlay_view;
     GraphBindings m_graph_bindings;
+
+    u32 m_graphics_queue_family { 0 };
+
+    // External overlay VkImage (zero-copy Vulkan path).
+    VkImage m_external_overlay_image { VK_NULL_HANDLE };
+    VkImageView m_external_overlay_view { VK_NULL_HANDLE };
+    VkSampler m_external_overlay_sampler { VK_NULL_HANDLE };
+    VkDescriptorPool m_external_overlay_pool { VK_NULL_HANDLE };
+    VkDescriptorSet m_external_overlay_set { VK_NULL_HANDLE };
+    u32 m_external_overlay_width { 0 };
+    u32 m_external_overlay_height { 0 };
+    bool m_external_overlay_dirty { false };
 
     ErrorOr<void> ensure_staging_buffer(VulkanContext const& ctx, VkDeviceSize size, VulkanBuffer& buffer);
     ErrorOr<void> ensure_texture_descriptor_set(VkDevice device, VkDescriptorSetLayout layout, VulkanTexture& texture);

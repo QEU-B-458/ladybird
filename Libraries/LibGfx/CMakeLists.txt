@@ -68,7 +68,7 @@ if (APPLE)
 endif()
 
 if (HAS_VULKAN)
-    list(APPEND SOURCES VulkanContext.cpp)
+    list(APPEND SOURCES VulkanContext.cpp ExternalVulkanImage.cpp)
 endif()
 
 if (HAS_FONTCONFIG)

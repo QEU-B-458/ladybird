@@ -98,4 +98,41 @@ ErrorOr<void> Renderer::draw_world(World const& world)
     return {};
 }
 
+void Renderer::set_external_overlay_image(VkImage image, u32 width, u32 height)
+{
+    if (m_vulkan_renderer)
+        m_vulkan_renderer->set_external_overlay_image(image, width, height);
+}
+
+void Renderer::clear_external_overlay()
+{
+    if (m_vulkan_renderer)
+        m_vulkan_renderer->clear_external_overlay();
+}
+
+bool Renderer::supports_external_image_import() const
+{
+    return m_vulkan_renderer && m_vulkan_renderer->supports_external_image_import();
+}
+
+VkDevice Renderer::vulkan_device() const
+{
+    return m_vulkan_renderer ? m_vulkan_renderer->vulkan_device() : VK_NULL_HANDLE;
+}
+
+u32 Renderer::last_frame_draw_calls() const
+{
+    return m_vulkan_renderer ? m_vulkan_renderer->last_frame_draw_calls() : 0;
+}
+
+u32 Renderer::last_frame_triangle_count() const
+{
+    return m_vulkan_renderer ? m_vulkan_renderer->last_frame_triangle_count() : 0;
+}
+
+Vector<VulkanRenderer::PassTiming> Renderer::last_frame_timings() const
+{
+    return m_vulkan_renderer ? m_vulkan_renderer->last_frame_timings() : Vector<VulkanRenderer::PassTiming> {};
+}
+
 }

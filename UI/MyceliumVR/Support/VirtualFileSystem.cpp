@@ -62,6 +62,15 @@ ErrorOr<void> VirtualFileSystem::mount_directory(StringView prefix, ByteString r
     return mount(prefix, make<DirectoryMount>(move(root_path)), permissions);
 }
 
+ErrorOr<void> VirtualFileSystem::unmount(StringView prefix)
+{
+    auto normalized_prefix = TRY(normalize_prefix(prefix));
+    if (!m_mounts.remove(normalized_prefix))
+        return Error::from_string_literal("Virtual filesystem mount prefix was not mounted");
+    m_permissions.remove(normalized_prefix);
+    return {};
+}
+
 ErrorOr<ByteBuffer> VirtualFileSystem::read_file(StringView virtual_path) const
 {
     auto resolved = TRY(resolve(virtual_path));
@@ -110,6 +119,14 @@ ErrorOr<VirtualFileSystem::ResolvedPath> VirtualFileSystem::resolve(StringView v
         return Error::from_string_literal("No virtual filesystem mount matched path");
 
     return best_match.release_value();
+}
+
+Vector<String> VirtualFileSystem::mount_prefixes() const
+{
+    Vector<String> prefixes;
+    for (auto const& [prefix, _] : m_mounts)
+        prefixes.append(prefix);
+    return prefixes;
 }
 
 ErrorOr<String> VirtualFileSystem::normalize_prefix(StringView prefix)

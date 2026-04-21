@@ -6,12 +6,13 @@
 #include "WebContentView.h"
 
 #include <LibGfx/Bitmap.h>
+#include <LibGfx/ExternalVulkanImage.h>
 #include <LibGfx/SharedImageBuffer.h>
+#include <LibIPC/File.h>
 #include <LibWeb/UIEvents/MouseButton.h>
+#include <LibWebView/WebContentClient.h>
 
-#if defined(TRACY_ENABLE)
-#    include <tracy/Tracy.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 
 namespace MyceliumVR {
 
@@ -92,9 +93,11 @@ static Web::UIEvents::KeyCode sdl_key_to_web_key(SDL_Keycode key)
     return Web::UIEvents::code_point_to_key_code(static_cast<u32>(key));
 }
 
-WebContentView::WebContentView(int width, int height)
+WebContentView::WebContentView(int width, int height, bool supports_vulkan_external_images, VkDevice vulkan_device)
     : m_width(width)
     , m_height(height)
+    , m_supports_vulkan_external_images(supports_vulkan_external_images)
+    , m_vulkan_device(vulkan_device)
 {
     on_ready_to_paint = [this]() {
         if constexpr (debug_web_content_paint)
@@ -121,6 +124,7 @@ WebContentView::WebContentView(int width, int height)
     if constexpr (debug_web_content_paint)
         dbgln("WebContentView: calling initialize_client...");
     initialize_client(CreateNewClient::Yes);
+    client().async_set_use_vulkan_external_images(m_supports_vulkan_external_images);
     if constexpr (debug_web_content_paint) {
         dbgln("WebContentView: initialize_client done, client connected: {}, page id: {}, front bitmap id: {}, back bitmap id: {}",
             m_client_state.client != nullptr,
@@ -133,7 +137,116 @@ WebContentView::WebContentView(int width, int height)
         dbgln("WebContentView: system visibility set to Visible");
 }
 
-WebContentView::~WebContentView() { }
+WebContentView::~WebContentView()
+{
+    destroy_vulkan_images();
+}
+
+void WebContentView::destroy_vulkan_images()
+{
+#if defined(USE_VULKAN)
+    if (m_vulkan_device == VK_NULL_HANDLE || m_vulkan_images.is_empty())
+        return;
+    // Ensure the GPU has finished sampling any of these images before freeing them.
+    // Resize is infrequent so the stall is acceptable — same pattern as swapchain recreation.
+    vkDeviceWaitIdle(m_vulkan_device);
+    for (auto& [id, slot] : m_vulkan_images) {
+        if (slot.imported.image != VK_NULL_HANDLE)
+            vkDestroyImage(m_vulkan_device, slot.imported.image, nullptr);
+        if (slot.imported.memory != VK_NULL_HANDLE)
+            vkFreeMemory(m_vulkan_device, slot.imported.memory, nullptr);
+    }
+    m_vulkan_images.clear();
+#endif
+}
+
+void WebContentView::did_allocate_vulkan_backing_stores(
+    Badge<WebView::WebContentClient>,
+    i32 front_image_id, IPC::File front_fd, u64 front_allocation_size, u32 front_memory_type_index, u32 front_format, u32 front_width, u32 front_height,
+    i32 back_image_id, IPC::File back_fd, u64 back_allocation_size, u32 back_memory_type_index, u32 back_format, u32 back_width, u32 back_height)
+{
+#if defined(USE_VULKAN)
+    if (m_vulkan_device == VK_NULL_HANDLE) {
+        warnln("WebContentView: received did_allocate_vulkan_backing_stores but no VkDevice — ignoring");
+        return;
+    }
+
+    destroy_vulkan_images();
+
+    // Update ViewImplementation's id tracking so server_did_paint can swap correctly.
+    m_client_state.front_bitmap.id = front_image_id;
+    m_client_state.back_bitmap.id = back_image_id;
+    m_client_state.has_usable_bitmap = false;
+
+    auto import_one = [&](i32 image_id, IPC::File& file, u64 alloc_size, u32 mem_type_idx, u32 format, u32 width, u32 height) {
+        Gfx::ExternalMemoryHandle handle;
+        handle.native = file.take_fd();
+        handle.allocation_size = alloc_size;
+        handle.memory_type_index = mem_type_idx;
+        handle.format = static_cast<VkFormat>(format);
+        handle.width = width;
+        handle.height = height;
+
+        auto imported_or_error = Gfx::import_external_vulkan_image(m_vulkan_device, move(handle));
+        if (imported_or_error.is_error()) {
+            warnln("WebContentView: failed to import VkImage id={}: {}", image_id, imported_or_error.error());
+            return;
+        }
+        m_vulkan_images.set(image_id, VulkanImageSlot {
+            .imported = imported_or_error.release_value(),
+            .width = width,
+            .height = height,
+        });
+    };
+
+    import_one(front_image_id, front_fd, front_allocation_size, front_memory_type_index, front_format, front_width, front_height);
+    import_one(back_image_id, back_fd, back_allocation_size, back_memory_type_index, back_format, back_width, back_height);
+
+    if constexpr (debug_web_content_paint)
+        dbgln("WebContentView: imported Vulkan backing stores front_id={} back_id={}", front_image_id, back_image_id);
+#else
+    (void)front_image_id; (void)front_fd; (void)front_allocation_size; (void)front_memory_type_index; (void)front_format; (void)front_width; (void)front_height;
+    (void)back_image_id; (void)back_fd; (void)back_allocation_size; (void)back_memory_type_index; (void)back_format; (void)back_width; (void)back_height;
+#endif
+}
+
+bool WebContentView::has_vulkan_image() const
+{
+#if defined(USE_VULKAN)
+    if (!m_client_state.has_usable_bitmap)
+        return false;
+    return m_vulkan_images.contains(m_client_state.front_bitmap.id);
+#else
+    return false;
+#endif
+}
+
+VkImage WebContentView::current_vulkan_image() const
+{
+#if defined(USE_VULKAN)
+    if (auto it = m_vulkan_images.find(m_client_state.front_bitmap.id); it != m_vulkan_images.end())
+        return it->value.imported.image;
+#endif
+    return VK_NULL_HANDLE;
+}
+
+u32 WebContentView::vulkan_image_width() const
+{
+#if defined(USE_VULKAN)
+    if (auto it = m_vulkan_images.find(m_client_state.front_bitmap.id); it != m_vulkan_images.end())
+        return it->value.width;
+#endif
+    return 0;
+}
+
+u32 WebContentView::vulkan_image_height() const
+{
+#if defined(USE_VULKAN)
+    if (auto it = m_vulkan_images.find(m_client_state.front_bitmap.id); it != m_vulkan_images.end())
+        return it->value.height;
+#endif
+    return 0;
+}
 
 bool WebContentView::needs_paint() const
 {

@@ -7,9 +7,7 @@
 
 #include "BridgeFunctions.h"
 
-#if defined(TRACY_ENABLE)
-#    include <tracy/Tracy.hpp>
-#endif
+#include <UI/MyceliumVR/Support/Profiling.h>
 
 #include <AK/Format.h>
 #include <LibCore/File.h>
@@ -47,14 +45,16 @@ public:
         auto api      = JS::Object::create(realm, realm.intrinsics().object_prototype());
         auto fs       = JS::Object::create(realm, realm.intrinsics().object_prototype());
         auto input    = JS::Object::create(realm, realm.intrinsics().object_prototype());
+        auto net      = JS::Object::create(realm, realm.intrinsics().object_prototype());
 
         // Populate registry metadata and bind all impls in one call.
         // To add a function, edit BridgeFunctions.cpp only.
-        BridgeFunctions::bind_all(m_runtime, realm, *mycelium, *api, *fs, *input);
+        BridgeFunctions::bind_all(m_runtime, realm, *mycelium, *api, *fs, *input, *net);
 
         mycelium->define_direct_property("api"_utf16_fly_string,   api,   JS::default_attributes);
         mycelium->define_direct_property("fs"_utf16_fly_string,    fs,    JS::default_attributes);
         mycelium->define_direct_property("input"_utf16_fly_string, input, JS::default_attributes);
+        mycelium->define_direct_property("net"_utf16_fly_string,   net,   JS::default_attributes);
         define_direct_property("mycelium"_utf16_fly_string, mycelium, JS::default_attributes);
     }
 
@@ -64,9 +64,11 @@ private:
 
 GC_DEFINE_ALLOCATOR(MyceliumGlobalObject);
 
-ScriptRuntime::ScriptRuntime(World& world, VirtualFileSystem* virtual_file_system, InputState* input_state, Function<void(VulkanRenderer::CameraState const&)> set_camera_state, Function<VulkanRenderer::CameraState()> camera_state, Function<void(VulkanRenderer::SceneLightData const&)> set_scene_light, Function<VulkanRenderer::SceneLightData()> scene_light)
-    : m_world(world)
-    , m_bridge_backend(world, move(set_camera_state), move(camera_state), move(set_scene_light), move(scene_light))
+ScriptRuntime::ScriptRuntime(ScriptHost& script_host, World& world, NetworkService& network_service, VirtualFileSystem* virtual_file_system, InputState* input_state, WorldRuntimeHost* runtime_host)
+    : m_script_host(script_host)
+    , m_world(world)
+    , m_network_service(network_service)
+    , m_bridge_backend(world, runtime_host)
     , m_virtual_file_system(virtual_file_system)
     , m_input_state(input_state)
 {
@@ -76,12 +78,11 @@ ScriptRuntime::~ScriptRuntime() = default;
 
 ErrorOr<void> ScriptRuntime::initialize()
 {
-    m_vm = JS::VM::create();
-    m_vm->set_dynamic_imports_allowed(false);
+    auto& vm = m_script_host.vm();
 
     GC::Ptr<JS::Realm> realm;
     auto context_or_error = JS::Realm::initialize_host_defined_realm(
-        *m_vm,
+        vm,
         [&](JS::Realm& new_realm) -> JS::Object* {
             realm = &new_realm;
             return new_realm.create<MyceliumGlobalObject>(new_realm, *this);
@@ -93,7 +94,7 @@ ErrorOr<void> ScriptRuntime::initialize()
     }
 
     m_global_execution_context = context_or_error.release_value();
-    m_vm->pop_execution_context();
+    vm.pop_execution_context();
     m_realm = GC::Root<JS::Realm>(*realm);
     return {};
 }
@@ -143,8 +144,8 @@ ErrorOr<void> ScriptRuntime::load_script_source(ByteBuffer source, StringView fi
 
 ErrorOr<void> ScriptRuntime::load_script_source(ByteBuffer source, StringView filename, ScriptEntrypoints entrypoints)
 {
-    VERIFY(m_vm);
     VERIFY(m_realm);
+    auto& vm = m_script_host.vm();
 
     auto script_or_errors = JS::Script::parse(source, *m_realm, filename);
     if (script_or_errors.is_error()) {
@@ -153,9 +154,9 @@ ErrorOr<void> ScriptRuntime::load_script_source(ByteBuffer source, StringView fi
         return Error::from_string_literal("Unable to parse MyceliumVR script");
     }
 
-    m_vm->push_execution_context(*m_global_execution_context);
-    auto result = m_vm->bytecode_interpreter().run(script_or_errors.release_value());
-    m_vm->pop_execution_context();
+    vm.push_execution_context(*m_global_execution_context);
+    auto result = vm.bytecode_interpreter().run(script_or_errors.release_value());
+    vm.pop_execution_context();
 
     if (result.is_error()) {
         report_exception(result.release_error());
@@ -164,9 +165,9 @@ ErrorOr<void> ScriptRuntime::load_script_source(ByteBuffer source, StringView fi
 
     m_loaded_scripts.append(entrypoints);
 
-    m_vm->push_execution_context(*m_global_execution_context);
+    vm.push_execution_context(*m_global_execution_context);
     auto start_result = call_if_function(m_loaded_scripts.last(), m_loaded_scripts.last().start_name);
-    m_vm->pop_execution_context();
+    vm.pop_execution_context();
 
     if (start_result.is_error())
         report_exception(start_result.release_error());
@@ -182,10 +183,11 @@ void ScriptRuntime::update(double delta_time)
     if (m_loaded_scripts.is_empty())
         return;
 
+    auto& vm = m_script_host.vm();
     for (auto& script : m_loaded_scripts) {
-        m_vm->push_execution_context(*m_global_execution_context);
+        vm.push_execution_context(*m_global_execution_context);
         auto result = call_if_function(script, script.update_name, JS::Value(delta_time));
-        m_vm->pop_execution_context();
+        vm.pop_execution_context();
 
         if (result.is_error())
             report_exception(result.release_error());
@@ -257,6 +259,7 @@ JS::ThrowCompletionOr<JS::Value> ScriptRuntime::write_text(JS::VM& vm, StringVie
 
 JS::ThrowCompletionOr<JS::Value> ScriptRuntime::call_if_function(ScriptEntrypoints& script, Utf16FlyString const& name, JS::Value argument)
 {
+    auto& vm = m_script_host.vm();
     auto value = TRY(m_realm->global_object().get(name));
     if (value.is_undefined()) {
         if (name == script.update_name && !script.reported_missing_update) {
@@ -267,18 +270,21 @@ JS::ThrowCompletionOr<JS::Value> ScriptRuntime::call_if_function(ScriptEntrypoin
     }
 
     if (!value.is_function())
-        return m_vm->throw_completion<JS::TypeError>("Expected script entrypoint to be a function"sv);
+        return vm.throw_completion<JS::TypeError>("Expected script entrypoint to be a function"sv);
 
     if (argument.is_undefined())
-        return JS::call(*m_vm, value.as_function(), JS::js_undefined());
+        return JS::call(vm, value.as_function(), JS::js_undefined());
 
-    return JS::call(*m_vm, value.as_function(), JS::js_undefined(), argument);
+    return JS::call(vm, value.as_function(), JS::js_undefined(), argument);
 }
 
 void ScriptRuntime::report_exception(JS::Completion const& completion)
 {
     auto value = completion.value();
-    warnln("MyceliumVR script exception: {}", value.to_string_without_side_effects());
+    auto message = value.to_string_without_side_effects();
+    warnln("MyceliumVR script exception: {}", message);
+    if (m_log_callback)
+        m_log_callback("error"sv, "script"sv, message.bytes_as_string_view());
 }
 
 }
