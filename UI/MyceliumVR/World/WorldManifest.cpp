@@ -128,6 +128,8 @@ ErrorOr<WorldManifest> load_world_manifest(VirtualFileSystem const& file_system,
         .package_name = move(package_name),
         .name = move(name),
         .entry_script = script.release_value(),
+        .script_tick_budget_ms = root.get_u32("script_tick_budget_ms"sv).value_or(0),
+        .wasm_memory_limit_mb = root.get_u32("wasm_memory_limit_mb"sv).value_or(64),
         .permissions = parse_permissions(root),
         .networking = TRY(parse_networking(root)),
     };

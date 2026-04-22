@@ -6,8 +6,11 @@
 #pragma once
 
 #include "World.h"
+#include "WorldManifest.h"
 #include "WorldRuntimeHost.h"
 
+#include "../Networking/NetworkService.h"
+#include "../Support/InputState.h"
 #include "../Networking/ControlBusServer.h"
 #include "../Scripting/WasmRuntime.h"
 
@@ -21,6 +24,10 @@
 #include <AK/OwnPtr.h>
 #include <AK/String.h>
 #include <AK/Vector.h>
+#include <condition_variable>
+#include <atomic>
+#include <mutex>
+#include <thread>
 
 namespace MyceliumVR {
 
@@ -47,6 +54,12 @@ enum class WorldRuntimeState {
     Background,
     Suspended,
     Stopped,
+};
+
+enum class WorldState {
+    Running,
+    Faulted,
+    Unloading,
 };
 
 class EntityScriptContext {
@@ -85,19 +98,48 @@ public:
     World const& world() const;
     void set_boot_info(BootInfo);
     Optional<BootInfo> const& boot_info() const { return m_boot_info; }
+    void set_bootstrap_info(BootstrapInfo);
+    Optional<BootstrapInfo> const& bootstrap_info() const { return m_bootstrap_info; }
+    void set_script_tick_budget_ms(u32 value) { m_script_tick_budget_ms = value; }
+    u32 script_tick_budget_ms() const { return m_script_tick_budget_ms; }
 
     bool is_initialized() const { return m_script_runtime; }
-    WorldLifecyclePhase phase() const { return m_phase; }
-    WorldRuntimeState state() const { return m_state; }
-    void set_state(WorldRuntimeState state) { m_state = state; }
+    WorldLifecyclePhase phase() const { return m_phase.load(); }
+    WorldRuntimeState state() const { return m_state.load(); }
+    void set_state(WorldRuntimeState state) { m_state.store(state); }
+    WorldState world_state() const { return m_world_state.load(); }
+    bool is_faulted() const { return m_world_state.load() == WorldState::Faulted; }
+    String const& fault_reason() const { return m_fault_reason; }
 
     ErrorOr<void> initialize(ScriptHost&, VirtualFileSystem*, InputState*, WorldRuntimeHost* = nullptr);
     ErrorOr<void> load_script(ByteString const&);
     ErrorOr<void> load_script_source(ByteBuffer, StringView filename);
     ErrorOr<void> load_control_script(ByteString const&);
     void set_log_callback(Function<void(StringView, StringView, StringView)>);
-    void update(double delta_time);
+    void update(double delta_time, InputFrameState);
     void shutdown();
+    void enqueue_network_events(Vector<NetworkEvent>);
+    Optional<NetworkEvent> dequeue_network_event();
+    Optional<String> dequeue_connection_payload_as_utf8(u32 connection_id);
+    void queue_update(double delta_time, InputFrameState);
+    void mark_faulted(String reason);
+
+    template<typename Callback>
+    decltype(auto) with_world_lock(Callback&& callback)
+    {
+        std::lock_guard lock(m_world_mutex);
+        return callback(*m_world);
+    }
+
+    template<typename Callback>
+    bool try_with_world_lock(Callback&& callback)
+    {
+        std::unique_lock lock(m_world_mutex, std::try_to_lock);
+        if (!lock.owns_lock())
+            return false;
+        callback(*m_world);
+        return true;
+    }
 
     ScriptRuntime& script_runtime();
     ScriptRuntime const& script_runtime() const;
@@ -117,16 +159,32 @@ public:
 private:
     WorldId m_id { 0 };
     String m_name;
-    WorldLifecyclePhase m_phase { WorldLifecyclePhase::Boot };
-    WorldRuntimeState m_state { WorldRuntimeState::Stopped };
+    std::atomic<WorldLifecyclePhase> m_phase { WorldLifecyclePhase::Boot };
+    std::atomic<WorldRuntimeState> m_state { WorldRuntimeState::Stopped };
+    std::atomic<WorldState> m_world_state { WorldState::Running };
+    String m_fault_reason;
     WorldManagementSystem& m_world_manager;
+    ScriptHost* m_script_host { nullptr };
     OwnPtr<World> m_world;
     OwnPtr<ScriptRuntime> m_script_runtime;
     OwnPtr<WasmRuntime> m_networking_wasm;
     OwnPtr<ControlBusServer> m_control_bus;
     HashMap<u32, NonnullOwnPtr<EntityScriptContext>> m_entity_script_contexts;
+    Vector<NetworkEvent> m_pending_network_events;
+    HashMap<u32, Vector<ByteBuffer>> m_connection_payloads;
     Vector<String> m_mount_prefixes;
     Optional<BootInfo> m_boot_info;
+    Optional<BootstrapInfo> m_bootstrap_info;
+    u32 m_script_tick_budget_ms { 0 };
+    std::mutex m_world_mutex;
+    std::mutex m_worker_mutex;
+    std::condition_variable m_worker_condition;
+    std::thread m_worker_thread;
+    bool m_worker_should_stop { false };
+    bool m_update_pending { false };
+    double m_pending_delta_time { 0.0 };
+    InputFrameState m_pending_input_state;
+    bool m_worker_started { false };
 };
 
 }

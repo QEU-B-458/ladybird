@@ -275,6 +275,13 @@ void OverlayManager::push_component_update(EntityComponentSnapshot const& snap)
     StringBuilder js;
     js.append("window.__myceliumBridge && window.__myceliumBridge.componentUpdate({"sv);
     js.appendff("id:{},name:'{}',"sv, static_cast<u32>(snap.id), escape(snap.name));
+    js.append("attachedComponents:["sv);
+    for (size_t i = 0; i < snap.attached_components.size(); ++i) {
+        if (i > 0)
+            js.append(","sv);
+        js.appendff("'{}'"sv, escape(snap.attached_components[i]));
+    }
+    js.append("],"sv);
     js.appendff("transform:{{px:{:.5f},py:{:.5f},pz:{:.5f},"sv,
         snap.position[0], snap.position[1], snap.position[2]);
     js.appendff("qx:{:.6f},qy:{:.6f},qz:{:.6f},qw:{:.6f},"sv,
@@ -287,7 +294,7 @@ void OverlayManager::push_component_update(EntityComponentSnapshot const& snap)
     else
         js.append("meshRenderer:null,"sv);
     if (snap.has_panel)
-        js.appendff("panel:{{width:{:.3f},height:{:.3f}}},"sv, snap.panel_width, snap.panel_height);
+        js.appendff("panel:{{url:'{}',width:{:.3f},height:{:.3f}}},"sv, escape(snap.panel_url), snap.panel_width, snap.panel_height);
     else
         js.append("panel:null,"sv);
     if (snap.has_cull_override)

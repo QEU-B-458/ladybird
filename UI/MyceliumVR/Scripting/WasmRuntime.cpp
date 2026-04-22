@@ -27,10 +27,14 @@ ErrorOr<void> WasmRuntime::initialize()
 
 ErrorOr<void> WasmRuntime::load_module(ByteBuffer source)
 {
+    m_faulted = false;
+    m_fault_reason = {};
     FixedMemoryStream stream(source.bytes());
     auto module_result = Wasm::Module::parse(stream);
-    if (module_result.is_error())
+    if (module_result.is_error()) {
+        fault("WasmRuntime: failed to parse module"_string);
         return Error::from_string_literal("WasmRuntime: failed to parse module");
+    }
     m_module = module_result.release_value();
     
     return {};
@@ -38,6 +42,12 @@ ErrorOr<void> WasmRuntime::load_module(ByteBuffer source)
 
 void WasmRuntime::update(double)
 {
+}
+
+void WasmRuntime::fault(String message)
+{
+    m_faulted = true;
+    m_fault_reason = move(message);
 }
 
 void WasmRuntime::bind_imports()

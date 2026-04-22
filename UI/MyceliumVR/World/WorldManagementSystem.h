@@ -23,6 +23,7 @@ class BridgeBackend;
 class InputState;
 class Renderer;
 class VirtualFileSystem;
+class UIOverlayBroker;
 
 class WorldManagementSystem {
 public:
@@ -37,6 +38,7 @@ public:
 
     void set_environment(VirtualFileSystem*, InputState*);
     void set_renderer(Renderer*);
+    void set_overlay_broker(UIOverlayBroker* broker) { m_overlay_broker = broker; }
     void set_runtime_log_callback(Function<void(StringView, StringView, StringView)>);
     ErrorOr<void> initialize();
     ErrorOr<void> boot(BootRequest const&);
@@ -49,13 +51,21 @@ public:
 
     NetworkService& network_service() { return m_network_service; }
     NetworkService const& network_service() const { return m_network_service; }
+    VirtualFileSystem* virtual_file_system() { return m_virtual_file_system; }
+    VirtualFileSystem const* virtual_file_system() const { return m_virtual_file_system; }
 
-    WorldRuntime& active_runtime();
-    WorldRuntime const& active_runtime() const;
-    World& active_world();
-    World const& active_world() const;
-    BridgeBackend& active_bridge_backend();
-    BridgeBackend const& active_bridge_backend() const;
+    WorldRuntime* find_runtime(WorldId);
+    WorldRuntime const* find_runtime(WorldId) const;
+    WorldRuntime* foreground_runtime();
+    WorldRuntime const* foreground_runtime() const;
+
+    template<typename Callback>
+    bool try_with_foreground_world_lock(Callback&& callback)
+    {
+        if (auto* runtime = foreground_runtime())
+            return runtime->try_with_world_lock(callback);
+        return false;
+    }
 
 private:
     struct PreparedWorld {
@@ -84,6 +94,7 @@ private:
     InputState* m_input_state { nullptr };
     Renderer* m_renderer { nullptr };
     OwnPtr<WorldRuntimeHost> m_runtime_host;
+    UIOverlayBroker* m_overlay_broker { nullptr };
     Function<void(StringView, StringView, StringView)> m_runtime_log_callback;
 };
 

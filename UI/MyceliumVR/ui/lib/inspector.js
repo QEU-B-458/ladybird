@@ -69,17 +69,12 @@ function renderInspector(container) {
   var alphaStr = c.tags.alphaBlend ? 'blend' : c.tags.alphaClip ? 'clip' : c.tags.alphaHash ? 'hash' : 'opaque';
   var cullStr  = c.cull || 'back';
 
-  // Build attached component chips.
-  var attached = ['Transform'];
-  if (c.meshRenderer) attached.push('MeshRenderer');
-  if (c.panel)        attached.push('Panel');
-  if (c.cull)         attached.push('CullOverride');
-  var tagLabels = [];
-  if (c.tags.isStatic)   tagLabels.push('Static');
-  if (c.tags.alphaBlend) tagLabels.push('AlphaBlend');
-  if (c.tags.alphaClip)  tagLabels.push('AlphaClip');
-  if (c.tags.alphaHash)  tagLabels.push('AlphaHash');
-  attached = attached.concat(tagLabels);
+  var attached = Array.isArray(c.attachedComponents) && c.attachedComponents.length > 0
+    ? c.attachedComponents.slice()
+    : ['Transform'];
+  var tagLabels = attached.filter(function (name) {
+    return name === 'Selected' || name === 'Static' || name === 'AlphaBlend' || name === 'AlphaClip' || name === 'AlphaHash';
+  });
 
   var transformSection = sectionHTML('transform', 'Component \u00b7 Transform',
     '<div class="prop-row"><div class="k">Position</div><div class="v">' +
@@ -103,6 +98,8 @@ function renderInspector(container) {
   var panelSection = '';
   if (c.panel) {
     panelSection = sectionHTML('panel', 'Component \u00b7 Panel',
+      '<div class="prop-row"><div class="k">URL</div><div class="v">' +
+        (c.panel.url || '\u2014') + '</div></div>' +
       '<div class="prop-row"><div class="k">Size</div><div class="v">' +
         c.panel.width.toFixed(2) + ' \u00d7 ' + c.panel.height.toFixed(2) + ' m</div></div>'
     );

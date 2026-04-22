@@ -21,6 +21,7 @@
 #include "../Support/GltfLoader.h"
 
 #include <AK/Format.h>
+#include <AK/JsonObject.h>
 #include <AK/Math.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/Object.h>
@@ -698,6 +699,10 @@ void bind_all(
         auto obj = JS::Object::create(realm, realm.intrinsics().object_prototype());
         TRY(obj->create_data_property("id"_utf16_fly_string, JS::Value(static_cast<u32>(s.id))));
         TRY(obj->create_data_property("name"_utf16_fly_string, JS::PrimitiveString::create(vm, s.name)));
+        auto attached_components = TRY(JS::Array::create(realm, s.attached_components.size()));
+        for (u32 i = 0; i < s.attached_components.size(); ++i)
+            TRY(attached_components->create_data_property(JS::PropertyKey(i), JS::PrimitiveString::create(vm, s.attached_components[i])));
+        TRY(obj->create_data_property("attachedComponents"_utf16_fly_string, JS::Value(attached_components)));
 
         auto xf = JS::Object::create(realm, realm.intrinsics().object_prototype());
         TRY(xf->create_data_property("px"_utf16_fly_string, JS::Value(s.position[0])));
@@ -724,6 +729,7 @@ void bind_all(
 
         if (s.has_panel) {
             auto panel = JS::Object::create(realm, realm.intrinsics().object_prototype());
+            TRY(panel->create_data_property("url"_utf16_fly_string, JS::PrimitiveString::create(vm, s.panel_url)));
             TRY(panel->create_data_property("width"_utf16_fly_string,  JS::Value(s.panel_width)));
             TRY(panel->create_data_property("height"_utf16_fly_string, JS::Value(s.panel_height)));
             TRY(obj->create_data_property("panel"_utf16_fly_string, JS::Value(panel)));
@@ -787,15 +793,16 @@ void bind_all(
 
     // -- Networking --
     reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
-        // TODO: Implement getBootstrapInfo
-        (void)runtime;
-        return JS::PrimitiveString::create(vm, "{}"_string);
+        auto info_or_error = runtime.network_bootstrap_info_json();
+        if (info_or_error.is_error())
+            return vm.throw_completion<JS::Error>(MUST(String::from_utf8(info_or_error.error().string_literal())));
+        return JS::PrimitiveString::create(vm, info_or_error.release_value());
     }, 0); // getBootstrapInfo
 
     reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
         auto kind = TRY(vm.argument(0).to_string(vm));
         auto addr = TRY(vm.argument(1).to_string(vm));
-        auto handle_or_error = runtime.network_service().connect(kind, addr);
+        auto handle_or_error = runtime.network_connect(kind, addr);
         if (handle_or_error.is_error())
             return vm.throw_completion<JS::Error>(MUST(String::from_utf8(handle_or_error.error().string_literal())));
         return JS::Value(handle_or_error.release_value());
@@ -805,7 +812,7 @@ void bind_all(
         auto handle = TRY(vm.argument(0).to_u32(vm));
         auto payload = TRY(vm.argument(1).to_string(vm));
         auto flags = TRY(vm.argument(2).to_u32(vm));
-        auto result = runtime.network_service().send(handle, payload.bytes(), flags);
+        auto result = runtime.network_send(handle, payload.bytes(), flags);
         if (result.is_error())
             return vm.throw_completion<JS::Error>(MUST(String::from_utf8(result.error().string_literal())));
         return JS::Value(0); // TODO: return actual bytes sent
@@ -813,22 +820,45 @@ void bind_all(
 
     reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
         auto handle = TRY(vm.argument(0).to_u32(vm));
-        (void)handle;
-        (void)runtime;
-        // TODO: Implement recv
-        return JS::js_null();
+        auto payload = runtime.network_receive_text(handle);
+        if (!payload.has_value())
+            return JS::js_null();
+        return JS::PrimitiveString::create(vm, payload.release_value());
     }, 1); // recv
 
     reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
-        (void)vm;
-        (void)runtime;
-        // TODO: Implement pollEvent
-        return JS::js_null();
+        auto event = runtime.network_poll_event();
+        if (!event.has_value())
+            return JS::js_null();
+
+        JsonObject json;
+        StringView type_name = "error"sv;
+        switch (event->type) {
+        case NetworkEvent::Type::Connected:
+            type_name = "connected"sv;
+            break;
+        case NetworkEvent::Type::Disconnected:
+            type_name = "disconnected"sv;
+            break;
+        case NetworkEvent::Type::Data:
+            type_name = "data"sv;
+            break;
+        case NetworkEvent::Type::Error:
+            type_name = "error"sv;
+            break;
+        }
+
+        json.set("type"sv, type_name);
+        json.set("connection_id"sv, event->connection_id);
+        json.set("payload_size"sv, static_cast<u32>(event->payload.size()));
+        if (!event->error_message.is_empty())
+            json.set("error"sv, event->error_message);
+        return JS::PrimitiveString::create(vm, json.serialized());
     }, 0); // pollEvent
 
     reg(net, [&runtime](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
         auto handle = TRY(vm.argument(0).to_u32(vm));
-        runtime.network_service().close(handle);
+        runtime.network_close(handle);
         return JS::js_undefined();
     }, 1); // close
 
@@ -884,15 +914,15 @@ void bind_all(
     }, 1, JS::default_attributes);
 
     input.define_native_function(realm, "mouseDeltaX"_utf16_fly_string, [&runtime](JS::VM&) -> JS::ThrowCompletionOr<JS::Value> {
-        return JS::Value(runtime.input_state() ? runtime.input_state()->mouse_delta_x() : 0.0f);
+        return JS::Value(runtime.input_state() ? runtime.input_state()->mouse_delta_x : 0.0f);
     }, 0, JS::default_attributes);
 
     input.define_native_function(realm, "mouseDeltaY"_utf16_fly_string, [&runtime](JS::VM&) -> JS::ThrowCompletionOr<JS::Value> {
-        return JS::Value(runtime.input_state() ? runtime.input_state()->mouse_delta_y() : 0.0f);
+        return JS::Value(runtime.input_state() ? runtime.input_state()->mouse_delta_y : 0.0f);
     }, 0, JS::default_attributes);
 
     input.define_native_function(realm, "wheelDeltaY"_utf16_fly_string, [&runtime](JS::VM&) -> JS::ThrowCompletionOr<JS::Value> {
-        return JS::Value(runtime.input_state() ? runtime.input_state()->wheel_delta_y() : 0.0f);
+        return JS::Value(runtime.input_state() ? runtime.input_state()->wheel_delta_y : 0.0f);
     }, 0, JS::default_attributes);
 
     api.define_native_function(realm, "functions"_utf16_fly_string, [](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {

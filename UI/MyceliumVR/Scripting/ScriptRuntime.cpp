@@ -7,9 +7,13 @@
 
 #include "BridgeFunctions.h"
 
+#include "../World/WorldRuntime.h"
+
 #include <UI/MyceliumVR/Support/Profiling.h>
 
 #include <AK/Format.h>
+#include <AK/JsonArray.h>
+#include <AK/JsonObject.h>
 #include <LibCore/File.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/Runtime/AbstractOperations.h>
@@ -64,14 +68,17 @@ private:
 
 GC_DEFINE_ALLOCATOR(MyceliumGlobalObject);
 
-ScriptRuntime::ScriptRuntime(ScriptHost& script_host, World& world, NetworkService& network_service, VirtualFileSystem* virtual_file_system, InputState* input_state, WorldRuntimeHost* runtime_host)
+ScriptRuntime::ScriptRuntime(ScriptHost& script_host, World& world, NetworkService& network_service, VirtualFileSystem* virtual_file_system, InputState* input_state, WorldRuntimeHost* runtime_host, WorldRuntime* world_runtime)
     : m_script_host(script_host)
     , m_world(world)
     , m_network_service(network_service)
     , m_bridge_backend(world, runtime_host)
     , m_virtual_file_system(virtual_file_system)
-    , m_input_state(input_state)
+    , m_input_state_source(input_state)
+    , m_world_runtime(world_runtime)
 {
+    if (m_input_state_source)
+        m_input_state_snapshot = m_input_state_source->snapshot();
 }
 
 ScriptRuntime::~ScriptRuntime() = default;
@@ -175,13 +182,15 @@ ErrorOr<void> ScriptRuntime::load_script_source(ByteBuffer source, StringView fi
     return {};
 }
 
-void ScriptRuntime::update(double delta_time)
+bool ScriptRuntime::update(double delta_time)
 {
 #if defined(TRACY_ENABLE)
     ZoneScopedN("Simulation/ScriptUpdate");
 #endif
     if (m_loaded_scripts.is_empty())
-        return;
+        return true;
+
+    clear_exception_state();
 
     auto& vm = m_script_host.vm();
     for (auto& script : m_loaded_scripts) {
@@ -192,6 +201,7 @@ void ScriptRuntime::update(double delta_time)
         if (result.is_error())
             report_exception(result.release_error());
     }
+    return !m_had_uncaught_exception;
 }
 
 JS::ThrowCompletionOr<JS::Value> ScriptRuntime::acquire_transform_buffer(JS::Realm& realm, u32 capacity)
@@ -245,6 +255,78 @@ bool ScriptRuntime::file_exists(StringView path) const
     return m_virtual_file_system->exists(path);
 }
 
+ErrorOr<String> ScriptRuntime::network_bootstrap_info_json() const
+{
+    JsonObject root;
+    if (!m_world_runtime || !m_world_runtime->bootstrap_info().has_value())
+        return root.serialized();
+
+    auto const& info = m_world_runtime->bootstrap_info().value();
+    root.set("world_id"sv, info.world_id);
+    root.set("package_name"sv, info.package_name);
+    root.set("world_name"sv, info.world_name);
+    root.set("mode"sv, info.mode);
+    root.set("protocol_version"sv, info.protocol_version);
+
+    JsonArray urls;
+    for (auto const& url : info.bootstrap_urls)
+        urls.must_append(url);
+    root.set("bootstrap_urls"sv, move(urls));
+
+    JsonArray transports;
+    for (auto const& transport : info.transports)
+        transports.must_append(transport);
+    root.set("transports"sv, move(transports));
+
+    JsonObject permissions;
+    permissions.set("storage"sv, info.storage_allowed);
+    permissions.set("network"sv, info.network_allowed);
+    permissions.set("wasm"sv, info.wasm_allowed);
+    root.set("permissions"sv, move(permissions));
+    return root.serialized();
+}
+
+ErrorOr<u32> ScriptRuntime::network_connect(StringView kind, StringView address)
+{
+    if (!m_world_runtime)
+        return Error::from_string_literal("Networking is unavailable outside a world runtime");
+    return m_network_service.connect(m_world_runtime->id(), kind, address);
+}
+
+ErrorOr<void> ScriptRuntime::network_send(u32 connection_id, ReadonlyBytes payload, u32 flags)
+{
+    if (!m_world_runtime)
+        return Error::from_string_literal("Networking is unavailable outside a world runtime");
+    return m_network_service.send(m_world_runtime->id(), connection_id, payload, flags);
+}
+
+void ScriptRuntime::network_close(u32 connection_id)
+{
+    if (!m_world_runtime)
+        return;
+    m_network_service.close(m_world_runtime->id(), connection_id);
+}
+
+Optional<NetworkEvent> ScriptRuntime::network_poll_event()
+{
+    if (!m_world_runtime)
+        return {};
+    return m_world_runtime->dequeue_network_event();
+}
+
+Optional<String> ScriptRuntime::network_receive_text(u32 connection_id)
+{
+    if (!m_world_runtime)
+        return {};
+    return m_world_runtime->dequeue_connection_payload_as_utf8(connection_id);
+}
+
+void ScriptRuntime::clear_exception_state()
+{
+    m_had_uncaught_exception = false;
+    m_last_exception_message = {};
+}
+
 JS::ThrowCompletionOr<JS::Value> ScriptRuntime::write_text(JS::VM& vm, StringView path, StringView text)
 {
     if (!m_virtual_file_system)
@@ -282,6 +364,8 @@ void ScriptRuntime::report_exception(JS::Completion const& completion)
 {
     auto value = completion.value();
     auto message = value.to_string_without_side_effects();
+    m_had_uncaught_exception = true;
+    m_last_exception_message = MUST(String::from_utf8(message.bytes()));
     warnln("MyceliumVR script exception: {}", message);
     if (m_log_callback)
         m_log_callback("error"sv, "script"sv, message.bytes_as_string_view());

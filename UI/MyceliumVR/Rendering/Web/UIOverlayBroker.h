@@ -18,6 +18,7 @@ namespace MyceliumVR {
 class Engine;
 class VirtualFileSystem;
 class WorldManagementSystem;
+class ControlBusClient;
 
 // Aggregates all overlay data sources and owns the OverlayManager.
 // main.cpp interacts only with this class — never with OverlayManager directly.
@@ -28,7 +29,8 @@ class WorldManagementSystem;
 //   broker.post_render()         — after  engine.render()  (GPU timings)
 class UIOverlayBroker {
 public:
-    UIOverlayBroker() = default;
+    UIOverlayBroker();
+    ~UIOverlayBroker();
 
     ErrorOr<void> initialize(
         int width, int height,
@@ -37,6 +39,8 @@ public:
         Engine& engine,
         WorldManagementSystem& world_management_system,
         VirtualFileSystem const* vfs = nullptr);
+
+    void connect_to_world(u16 port, StringView token);
 
     void tick(double fps, double delta_time_ms);
     void post_render();
@@ -60,10 +64,14 @@ public:
     u32    overlay_vulkan_height()    const;
 
 private:
+    void handle_control_bus_message(JsonObject const&);
+
     OwnPtr<OverlayManager> m_overlay;
+    OwnPtr<ControlBusClient> m_control_bus_client;
     Engine*        m_engine         { nullptr };
     WorldManagementSystem* m_world_management_system { nullptr };
     Vector<String> m_vfs_mounts;
+    EntityId       m_selected_entity { entt::null };
     bool           m_startup_pushed { false };
 };
 

@@ -11,6 +11,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/String.h>
 #include <AK/StringView.h>
+#include <LibCore/DirectoryEntry.h>
 
 namespace MyceliumVR {
 
@@ -26,6 +27,7 @@ public:
     virtual ErrorOr<ByteBuffer> read_file(StringView relative_path) const = 0;
     virtual ErrorOr<void> write_file(StringView relative_path, ReadonlyBytes) = 0;
     virtual bool exists(StringView relative_path) const = 0;
+    virtual ErrorOr<Vector<Core::DirectoryEntry>> list_directory(StringView relative_path) const = 0;
 };
 
 class DirectoryMount final : public Mount {
@@ -35,6 +37,7 @@ public:
     virtual ErrorOr<ByteBuffer> read_file(StringView relative_path) const override;
     virtual ErrorOr<void> write_file(StringView relative_path, ReadonlyBytes) override;
     virtual bool exists(StringView relative_path) const override;
+    virtual ErrorOr<Vector<Core::DirectoryEntry>> list_directory(StringView relative_path) const override;
 
 private:
     ErrorOr<ByteString> resolve(StringView relative_path) const;
@@ -51,6 +54,7 @@ public:
     ErrorOr<ByteBuffer> read_file(StringView virtual_path) const;
     ErrorOr<void> write_file(StringView virtual_path, ReadonlyBytes);
     bool exists(StringView virtual_path) const;
+    ErrorOr<Vector<Core::DirectoryEntry>> list_directory(StringView virtual_path) const;
     Vector<String> mount_prefixes() const;
 
 private:

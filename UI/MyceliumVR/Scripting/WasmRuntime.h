@@ -28,14 +28,19 @@ public:
     ErrorOr<void> load_module(ByteBuffer source);
     
     void update(double delta_time);
+    bool is_faulted() const { return m_faulted; }
+    String const& fault_reason() const { return m_fault_reason; }
 
 private:
+    void fault(String message);
     void bind_imports();
 
     ScriptRuntime& m_script_runtime;
     Wasm::AbstractMachine m_machine;
     OwnPtr<Wasm::ModuleInstance> m_instance;
     RefPtr<Wasm::Module> m_module;
+    bool m_faulted { false };
+    String m_fault_reason;
 };
 
 }

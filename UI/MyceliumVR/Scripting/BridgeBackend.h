@@ -7,7 +7,6 @@
 
 #include "../World/World.h"
 #include "../World/WorldRuntimeHost.h"
-#include "../IPC/SupervisorClient.h"
 
 #include <AK/Function.h>
 #include <AK/Optional.h>
@@ -28,6 +27,7 @@ struct EntityHierarchyEntry {
 struct EntityComponentSnapshot {
     EntityId id { entt::null };
     String name;
+    Vector<String> attached_components;
 
     float position[3] { 0.0f, 0.0f, 0.0f };
     float rotation[4] { 0.0f, 0.0f, 0.0f, 1.0f }; // XYZW quaternion
@@ -39,6 +39,7 @@ struct EntityComponentSnapshot {
     String normal_map;
 
     bool has_panel { false };
+    String panel_url;
     float panel_width { 1.0f };
     float panel_height { 1.0f };
 
@@ -85,7 +86,6 @@ public:
 
     void set_selection_changed_callback(Function<void(EntityId)> cb) { m_on_selection_changed = move(cb); }
     void set_log_callback(Function<void(StringView, StringView, StringView)> cb) { m_log_callback = move(cb); }
-    void set_supervisor_client(RefPtr<SupervisorClient> client) { m_supervisor_client = move(client); }
 
     World& world() { return m_world; }
     World const& world() const { return m_world; }
@@ -93,7 +93,6 @@ public:
 private:
     World& m_world;
     WorldRuntimeHost* m_runtime_host { nullptr };
-    RefPtr<SupervisorClient> m_supervisor_client;
     Function<void(EntityId)> m_on_selection_changed;
     Function<void(StringView, StringView, StringView)> m_log_callback;
 };

@@ -67,19 +67,6 @@ add_executable(ladybird
     Scripting/BridgeFunctions.cpp
     Scripting/BridgeRegistry.h
     Scripting/BridgeRegistry.cpp
-    IPC/IpcProtocol.cpp
-    IPC/IpcProtocol.h
-    IPC/IpcTransport.h
-    IPC/TcpLoopbackTransport.cpp
-    IPC/TcpLoopbackTransport.h
-    IPC/LocalIpcTransport.cpp
-    IPC/LocalIpcTransport.h
-    IPC/SupervisorClient.cpp
-    IPC/SupervisorClient.h
-    IPC/WorldWorkerClient.cpp
-    IPC/WorldWorkerClient.h
-    Supervisor/Supervisor.h
-    Supervisor/Supervisor.cpp
     Scripting/SDKGenerator.h
     Scripting/SDKGenerator.cpp
     Scripting/ScriptHost.h
@@ -104,6 +91,8 @@ add_executable(ladybird
     Networking/NetworkService.cpp
     Networking/ControlBusServer.h
     Networking/ControlBusServer.cpp
+    Networking/ControlBusClient.h
+    Networking/ControlBusClient.cpp
     Networking/WebSocketTransport.h
     Networking/WebSocketTransport.cpp
     World/WorldRuntimeHost.h
@@ -119,12 +108,7 @@ add_executable(ladybird
     World/WorldRuntime.cpp
     World/World.h
     World/World.cpp
-    "${CMAKE_CURRENT_BINARY_DIR}/WorldWorkerEndpoint.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/SupervisorEndpoint.h"
 )
-
-compile_ipc(IPC/WorldWorker.ipc "${CMAKE_CURRENT_BINARY_DIR}/WorldWorkerEndpoint.h")
-compile_ipc(IPC/Supervisor.ipc "${CMAKE_CURRENT_BINARY_DIR}/SupervisorEndpoint.h")
 
 set_source_files_properties(
     Rendering/Renderer.cpp

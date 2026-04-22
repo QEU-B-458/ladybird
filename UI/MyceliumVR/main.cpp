@@ -9,7 +9,6 @@
 #include "Rendering/Backend/VulkanProbe.h"
 #include "Rendering/Web/WebViewManager.h"
 #include "Scripting/SDKGenerator.h"
-#include "Supervisor/Supervisor.h"
 #include "Support/InputState.h"
 #include "Support/VirtualFileSystem.h"
 
@@ -37,16 +36,6 @@ static Optional<StringView> take_option_value(Main::Arguments arguments, StringV
     return {};
 }
 
-static bool has_flag(Main::Arguments arguments, StringView option_name)
-{
-    for (auto i = 1; i < arguments.argc; ++i) {
-        StringView argument { arguments.argv[i], strlen(arguments.argv[i]) };
-        if (argument == option_name)
-            return true;
-    }
-    return false;
-}
-
 static MyceliumVR::ShadowQuality parse_shadow_quality(StringView value)
 {
     auto parsed = value.to_number<i32>();
@@ -61,60 +50,6 @@ static MyceliumVR::ShadowQuality parse_shadow_quality(StringView value)
 
 ErrorOr<int> ladybird_main(Main::Arguments arguments)
 {
-    // Refinement A: Lean Worker Boot
-    // Detect worker role immediately to bypass expensive Host-only subsystems (SDL3, Vulkan, UI).
-    if (has_flag(arguments, "--world-worker"sv)) {
-        auto ipc_port = take_option_value(arguments, "--ipc-port"sv);
-        auto ipc_address = take_option_value(arguments, "--ipc-address"sv);
-        auto launch_token = take_option_value(arguments, "--launch-token"sv);
-        auto world_package = take_option_value(arguments, "--world-package"sv);
-
-        if ((!ipc_port.has_value() && !ipc_address.has_value()) || !launch_token.has_value() || !world_package.has_value())
-            return Error::from_string_literal("--world-worker requires (--ipc-port or --ipc-address), --launch-token, and --world-package");
-
-        u16 port = 0;
-        if (ipc_port.has_value()) {
-            if (auto p = ipc_port->to_number<u16>(); p.has_value())
-                port = *p;
-        }
-
-        // The worker process bypasses all windowing and rendering logic below.
-        return MyceliumVR::WorldWorkerProcess::run({
-            .endpoint = { .port = port },
-            .ipc_address = ByteString(ipc_address.value_or(""sv)),
-            .launch_token = ByteString(*launch_token),
-            .world_package = ByteString(*world_package),
-            .world_path = ByteString(take_option_value(arguments, "--world-path"sv).value_or(""sv)),
-            .channel_target_world = take_option_value(arguments, "--channel-target-world"sv).has_value() ? take_option_value(arguments, "--channel-target-world"sv)->to_number<u32>() : Optional<u32> {},
-            .channel_payload = ByteString(take_option_value(arguments, "--channel-payload"sv).value_or(""sv)),
-            .portal_target_world = take_option_value(arguments, "--portal-target-world"sv).has_value() ? take_option_value(arguments, "--portal-target-world"sv)->to_number<u32>() : Optional<u32> {},
-            .send_camera_pose = has_flag(arguments, "--send-camera-pose"sv),
-            .test_capability_denial = has_flag(arguments, "--test-capability-denial"sv),
-            .test_watchdog = has_flag(arguments, "--test-watchdog"sv),
-            .test_quota = has_flag(arguments, "--test-quota"sv),
-        });
-    }
-
-    if (has_flag(arguments, "--supervisor-hardening-self-test"sv)) {
-        TRY(MyceliumVR::SupervisorSelfTest::run_hardening_self_test());
-        return 0;
-    }
-
-    if (has_flag(arguments, "--supervisor-portal-self-test"sv)) {
-        TRY(MyceliumVR::SupervisorSelfTest::run_portal_self_test());
-        return 0;
-    }
-
-    if (has_flag(arguments, "--supervisor-channel-self-test"sv)) {
-        TRY(MyceliumVR::SupervisorSelfTest::run_channel_self_test());
-        return 0;
-    }
-
-    if (has_flag(arguments, "--supervisor-self-test"sv)) {
-        TRY(MyceliumVR::SupervisorSelfTest::run());
-        return 0;
-    }
-
     if (auto sdk_generation_target = take_option_value(arguments, "--generate-sdk"sv); sdk_generation_target.has_value()) {
         auto sdk_output_directory = take_option_value(arguments, "--sdk-output"sv).value_or("UI/MyceliumVR/sdk"sv);
         TRY(MyceliumVR::generate_sdk(*sdk_generation_target, sdk_output_directory));
@@ -176,26 +111,31 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         SDL_Quit();
         return 0;
     }
+{
+    MyceliumVR::VirtualFileSystem virtual_file_system;
+    MyceliumVR::InputState input_state;
+    MyceliumVR::Engine engine(*window, &virtual_file_system);
+    TRY(engine.initialize_world_management_system(&virtual_file_system, &input_state));
+    engine.set_shadow_quality(parse_shadow_quality(app->shadow_quality()));
 
-    {
-        MyceliumVR::VirtualFileSystem virtual_file_system;
-        MyceliumVR::InputState input_state;
-        MyceliumVR::Engine engine(*window, &virtual_file_system);
-        TRY(engine.initialize_world_management_system(&virtual_file_system, &input_state));
-        engine.set_shadow_quality(parse_shadow_quality(app->shadow_quality()));
-        TRY(engine.world_management_system().boot({
-            .world_path = ByteString(app->world_path()),
-            .script_path = app->script_path(),
-            .control_script_path = ByteString("UI/MyceliumVR/scripts/controls.js"),
-            .has_script_path_override = app->has_script_path_override(),
-        }));
+    MyceliumVR::UIOverlayBroker overlay_broker;
+    engine.world_management_system().set_overlay_broker(&overlay_broker);
 
-        MyceliumVR::WebViewManager web_view_manager;
-        web_view_manager.sync_world(engine.active_world());
-        outln("WebViewManager is running for in-world panel textures.");
+    TRY(engine.world_management_system().boot({
+        .world_path = ByteString(app->world_path()),
+        .script_path = app->script_path(),
+        .control_script_path = ByteString("UI/MyceliumVR/scripts/controls.js"),
+        .has_script_path_override = app->has_script_path_override(),
+    }));
 
-        MyceliumVR::UIOverlayBroker overlay_broker;
-        bool window_has_focus = true;
+    MyceliumVR::WebViewManager web_view_manager;
+    if (auto* runtime = engine.world_management_system().foreground_runtime()) {
+        runtime->with_world_lock([&](auto& world) {
+            web_view_manager.sync_world(world);
+        });
+    }
+    outln("WebViewManager is running for in-world panel textures.");
+    bool window_has_focus = true;
 
         outln("Loading window UI and managed in-world webviews.");
 
@@ -235,11 +175,6 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         };
         update_mouse_capture();
         TRY(sync_window_surfaces());
-
-        // Script exceptions → overlay console.
-        engine.world_management_system().set_runtime_log_callback([&overlay_broker](StringView level, StringView source, StringView message) {
-            overlay_broker.push_log(level, source, message);
-        });
 
         auto sigint_handler = Core::EventLoop::register_signal(SIGINT, [&](int) {
             request_shutdown();
@@ -306,7 +241,11 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
             engine.world_management_system().update(delta_time);
 
             auto fps = delta_time > 0.0 ? (1.0 / delta_time) : 0.0;
-            web_view_manager.sync_world(engine.active_world());
+            if (auto* runtime = engine.world_management_system().foreground_runtime()) {
+                runtime->with_world_lock([&](auto& world) {
+                    web_view_manager.sync_world(world);
+                });
+            }
             overlay_broker.tick(fps, delta_time * 1000.0);
 
             if (web_view_manager.has_active_panel()) {

@@ -9,6 +9,7 @@
 #include <AK/Error.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
+#include <AK/HashTable.h>
 #include <AK/JsonObject.h>
 #include <AK/JsonValue.h>
 #include <AK/RefCounted.h>
@@ -28,6 +29,7 @@ public:
 
     ErrorOr<void> start(u32 world_id);
     void stop();
+    void send_event(StringView event, JsonValue const& data = JsonValue());
 
     u16 port() const { return m_port; }
     String const& capability_token() const { return m_capability_token; }
@@ -37,6 +39,7 @@ private:
         NonnullOwnPtr<Core::BufferedTCPSocket> socket;
         bool handshaked { false };
         Vector<String> granted_capabilities;
+        HashTable<String> subscribed_topics;
 
         explicit Client(NonnullOwnPtr<Core::BufferedTCPSocket> s) : socket(move(s)) {}
     };
@@ -45,8 +48,17 @@ private:
     void on_client_data(Client&);
     ErrorOr<void> handle_handshake(Client&, StringView request);
     ErrorOr<void> handle_message(Client&, StringView message);
+    ErrorOr<void> handle_system_info(Client&, StringView id);
+    ErrorOr<void> handle_entities_list(Client&, StringView id);
+    ErrorOr<void> handle_entities_inspect(Client&, StringView id, u32 entity_id);
+    ErrorOr<void> handle_entities_select(Client&, StringView id, u32 entity_id);
+    ErrorOr<void> handle_contexts_list(Client&, StringView id);
+    ErrorOr<void> handle_contexts_restart(Client&, StringView id, JsonObject const&);
+    ErrorOr<void> handle_filesystem_list_dir(Client&, StringView id, StringView path);
+    ErrorOr<void> handle_filesystem_read_text(Client&, StringView id, StringView path);
+    ErrorOr<void> handle_metrics_snapshot(Client&, StringView id);
+    ErrorOr<void> handle_events_subscribe(Client&, StringView id, JsonObject const&);
     void send_response(Client&, StringView id, bool ok, JsonValue const& result = JsonValue(), JsonValue const& error = JsonValue());
-    void send_event(StringView event, JsonValue const& data = JsonValue());
 
     WorldManagementSystem& m_world_manager;
     u32 m_world_id { 0 };

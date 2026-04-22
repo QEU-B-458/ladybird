@@ -11,6 +11,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/Vector.h>
 #include <SDL3/SDL.h>
+#include <mutex>
 namespace MyceliumVR {
 
 class VirtualFileSystem;
@@ -43,6 +44,7 @@ public:
     Vector<VulkanRenderer::PassTiming> last_frame_timings() const;
 
 private:
+    mutable std::mutex m_mutex;
     OwnPtr<VulkanRenderer> m_vulkan_renderer;
 };
 

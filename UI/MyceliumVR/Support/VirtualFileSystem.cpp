@@ -6,6 +6,7 @@
 #include "VirtualFileSystem.h"
 
 #include <AK/LexicalPath.h>
+#include <LibCore/DirIterator.h>
 #include <LibCore/File.h>
 #include <LibCore/System.h>
 
@@ -37,6 +38,25 @@ bool DirectoryMount::exists(StringView relative_path) const
     if (host_path.is_error())
         return false;
     return !Core::System::stat(host_path.value()).is_error();
+}
+
+ErrorOr<Vector<Core::DirectoryEntry>> DirectoryMount::list_directory(StringView relative_path) const
+{
+    auto host_path = TRY(resolve(relative_path));
+    Core::DirIterator iterator(host_path, Core::DirIterator::SkipParentAndBaseDir);
+    if (iterator.has_error())
+        return iterator.error();
+
+    Vector<Core::DirectoryEntry> entries;
+    while (iterator.has_next()) {
+        auto entry = iterator.next();
+        if (!entry.has_value())
+            break;
+        entries.append(entry.release_value());
+    }
+    if (iterator.has_error())
+        return iterator.error();
+    return entries;
 }
 
 ErrorOr<ByteString> DirectoryMount::resolve(StringView relative_path) const
@@ -92,6 +112,12 @@ bool VirtualFileSystem::exists(StringView virtual_path) const
     if (resolved.is_error())
         return false;
     return resolved.value().mount->exists(resolved.value().relative_path);
+}
+
+ErrorOr<Vector<Core::DirectoryEntry>> VirtualFileSystem::list_directory(StringView virtual_path) const
+{
+    auto resolved = TRY(resolve(virtual_path));
+    return TRY(resolved.mount->list_directory(resolved.relative_path));
 }
 
 ErrorOr<VirtualFileSystem::ResolvedPath> VirtualFileSystem::resolve(StringView virtual_path) const

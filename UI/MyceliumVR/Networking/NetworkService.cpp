@@ -11,7 +11,7 @@ namespace MyceliumVR {
 NetworkService::NetworkService() = default;
 NetworkService::~NetworkService() = default;
 
-ErrorOr<u32> NetworkService::connect(StringView kind, StringView address)
+ErrorOr<u32> NetworkService::connect(u32 world_id, StringView kind, StringView address)
 {
     if (m_connections.size() >= m_limits.max_connections)
         return Error::from_string_literal("NetworkService: max connections reached");
@@ -26,11 +26,14 @@ ErrorOr<u32> NetworkService::connect(StringView kind, StringView address)
     }
 
     TRY(transport->connect(address));
-    m_connections.set(id, transport.release_nonnull());
+    m_connections.set(id, ConnectionRecord {
+        .world_id = world_id,
+        .transport = transport.release_nonnull(),
+    });
     return id;
 }
 
-ErrorOr<void> NetworkService::send(u32 connection_id, ReadonlyBytes payload, u32 flags)
+ErrorOr<void> NetworkService::send(u32 world_id, u32 connection_id, ReadonlyBytes payload, u32 flags)
 {
     if (payload.size() > m_limits.max_message_size)
         return Error::from_string_literal("NetworkService: message size exceeds limit");
@@ -38,26 +41,44 @@ ErrorOr<void> NetworkService::send(u32 connection_id, ReadonlyBytes payload, u32
     auto it = m_connections.find(connection_id);
     if (it == m_connections.end())
         return Error::from_string_literal("NetworkService: invalid connection id");
+    if (it->value.world_id != world_id)
+        return Error::from_string_literal("NetworkService: connection does not belong to this world");
 
-    TRY(it->value->send(payload, flags));
+    TRY(it->value.transport->send(payload, flags));
     return {};
 }
 
-void NetworkService::close(u32 connection_id)
+void NetworkService::close(u32 world_id, u32 connection_id)
 {
     auto it = m_connections.find(connection_id);
     if (it == m_connections.end())
         return;
+    if (it->value.world_id != world_id)
+        return;
 
-    it->value->close();
+    it->value.transport->close();
     m_connections.remove(it);
 }
 
-Vector<NetworkEvent> NetworkService::poll_events()
+void NetworkService::close_world_connections(u32 world_id)
+{
+    Vector<u32> connection_ids;
+    for (auto& entry : m_connections) {
+        if (entry.value.world_id == world_id)
+            connection_ids.append(entry.key);
+    }
+
+    for (auto connection_id : connection_ids)
+        close(world_id, connection_id);
+}
+
+Vector<NetworkEvent> NetworkService::poll_events(u32 world_id)
 {
     Vector<NetworkEvent> all_events;
     for (auto& entry : m_connections) {
-        auto events = entry.value->poll_events();
+        if (entry.value.world_id != world_id)
+            continue;
+        auto events = entry.value.transport->poll_events();
         all_events.extend(move(events));
     }
     return all_events;

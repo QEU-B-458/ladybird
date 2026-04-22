@@ -5,15 +5,47 @@
 
 #include "WorldManagementSystem.h"
 
+#include "../Networking/ControlBusServer.h"
 #include "../Rendering/Renderer.h"
+#include "../Rendering/Web/UIOverlayBroker.h"
 #include "../Scripting/BridgeBackend.h"
 #include "../Support/InputState.h"
 #include "../Support/VirtualFileSystem.h"
 
 #include <AK/LexicalPath.h>
+#include <AK/JsonObject.h>
 #include <LibCore/Directory.h>
 
 namespace MyceliumVR {
+
+static BootstrapInfo build_bootstrap_info(WorldId world_id, WorldManifest const& manifest)
+{
+    return BootstrapInfo {
+        .world_id = world_id,
+        .package_name = manifest.package_name,
+        .world_name = manifest.name,
+        .mode = manifest.networking.bootstrap.mode.is_empty() ? "none"_string : manifest.networking.bootstrap.mode,
+        .bootstrap_urls = manifest.networking.bootstrap.urls,
+        .transports = manifest.networking.transports,
+        .protocol_version = manifest.networking.protocol_version,
+        .storage_allowed = manifest.permissions.storage,
+        .network_allowed = manifest.permissions.network,
+        .wasm_allowed = manifest.permissions.wasm,
+    };
+}
+
+static ErrorOr<void> validate_networking_manifest(WorldManifest const& manifest)
+{
+    if (manifest.networking.entry_wasm.is_empty())
+        return {};
+    if (!manifest.permissions.network)
+        return Error::from_string_literal("World manifest declares networking.entry_wasm without permissions.network");
+    if (!manifest.permissions.wasm)
+        return Error::from_string_literal("World manifest declares networking.entry_wasm without permissions.wasm");
+    if (manifest.networking.transports.is_empty())
+        return Error::from_string_literal("World manifest declares networking.entry_wasm without any transports");
+    return {};
+}
 
 WorldManagementSystem::WorldManagementSystem(VirtualFileSystem* virtual_file_system, InputState* input_state)
     : m_virtual_file_system(virtual_file_system)
@@ -49,7 +81,6 @@ void WorldManagementSystem::set_runtime_log_callback(Function<void(StringView, S
 
 ErrorOr<void> WorldManagementSystem::initialize()
 {
-    TRY(m_script_host.initialize());
     auto& runtime = ensure_runtime(m_session.active_world_id(), m_session.active_world_name());
     runtime.set_state(WorldRuntimeState::Foreground);
     return initialize_runtime(runtime);
@@ -60,7 +91,7 @@ ErrorOr<void> WorldManagementSystem::boot(BootRequest const& request)
     if (!request.world_path.is_empty())
         return switch_to_world(request);
 
-    auto& runtime = active_runtime();
+    auto& runtime = runtime_by_id(m_session.active_world_id());
     if (!runtime.is_initialized())
         TRY(initialize_runtime(runtime));
     return boot_runtime(runtime, request, {});
@@ -72,7 +103,7 @@ ErrorOr<void> WorldManagementSystem::switch_to_world(BootRequest const& request)
     cancel_loading_world();
 
     auto* existing_runtime = find_runtime_by_source_path(request.world_path);
-    auto& previous_active_runtime = active_runtime();
+    auto& previous_active_runtime = runtime_by_id(m_session.active_world_id());
     if (existing_runtime) {
         if (existing_runtime->id() == previous_active_runtime.id())
             return {};
@@ -95,6 +126,8 @@ ErrorOr<void> WorldManagementSystem::switch_to_world(BootRequest const& request)
         .state_mount_root = prepared.state_mount_root,
         .entry_script_path = prepared.entry_script_path,
     });
+    loading_runtime.set_bootstrap_info(build_bootstrap_info(loading_world_id, prepared.manifest));
+    loading_runtime.set_script_tick_budget_ms(prepared.manifest.script_tick_budget_ms);
 
     auto rollback_loading_world = [&]() {
         unmount_runtime(loading_runtime);
@@ -145,50 +178,46 @@ void WorldManagementSystem::cancel_loading_world()
 
 void WorldManagementSystem::update(double delta_time)
 {
-    auto network_events = m_network_service.poll_events();
-
     for (auto& entry : m_world_runtimes) {
         auto& runtime = *entry.value;
         if (!runtime.is_initialized())
             continue;
         if (runtime.state() == WorldRuntimeState::Suspended || runtime.state() == WorldRuntimeState::Stopped)
             continue;
-        
-        // TODO: Dispatch relevant network_events to runtime.
-        // For now, they are just polled and cleared.
+        if (runtime.is_faulted())
+            continue;
 
-        runtime.update(delta_time);
+        runtime.enqueue_network_events(m_network_service.poll_events(runtime.id()));
+
+        auto input_frame = m_input_state ? m_input_state->snapshot() : InputFrameState {};
+        runtime.update(delta_time, move(input_frame));
     }
 }
 
-WorldRuntime& WorldManagementSystem::active_runtime()
+WorldRuntime* WorldManagementSystem::find_runtime(WorldId world_id)
 {
-    return runtime_by_id(m_session.active_world_id());
+    auto it = m_world_runtimes.find(world_id);
+    if (it == m_world_runtimes.end())
+        return nullptr;
+    return it->value.ptr();
 }
 
-WorldRuntime const& WorldManagementSystem::active_runtime() const
+WorldRuntime const* WorldManagementSystem::find_runtime(WorldId world_id) const
 {
-    return runtime_by_id(m_session.active_world_id());
+    auto it = m_world_runtimes.find(world_id);
+    if (it == m_world_runtimes.end())
+        return nullptr;
+    return it->value.ptr();
 }
 
-World& WorldManagementSystem::active_world()
+WorldRuntime* WorldManagementSystem::foreground_runtime()
 {
-    return active_runtime().world();
+    return find_runtime(m_session.active_world_id());
 }
 
-World const& WorldManagementSystem::active_world() const
+WorldRuntime const* WorldManagementSystem::foreground_runtime() const
 {
-    return active_runtime().world();
-}
-
-BridgeBackend& WorldManagementSystem::active_bridge_backend()
-{
-    return active_runtime().bridge_backend();
-}
-
-BridgeBackend const& WorldManagementSystem::active_bridge_backend() const
-{
-    return active_runtime().bridge_backend();
+    return find_runtime(m_session.active_world_id());
 }
 
 WorldRuntime& WorldManagementSystem::runtime_by_id(WorldId world_id)
@@ -242,6 +271,7 @@ ErrorOr<WorldManagementSystem::PreparedWorld> WorldManagementSystem::prepare_wor
         return manifest_result.release_error();
     TRY(unmount_result);
     auto manifest = manifest_result.release_value();
+    TRY(validate_networking_manifest(manifest));
 
     auto world_mount_root = TRY(package_mount_root(manifest.package_name));
     auto state_mount_root = MUST(String::formatted("state://{}/", manifest.package_name));
@@ -318,7 +348,8 @@ void WorldManagementSystem::unmount_runtime(WorldRuntime& runtime)
 ErrorOr<void> WorldManagementSystem::initialize_runtime(WorldRuntime& runtime)
 {
     runtime.shutdown();
-    TRY(m_script_host.initialize());
+    if (!m_script_host.is_initialized())
+        TRY(m_script_host.initialize());
     TRY(runtime.initialize(m_script_host, m_virtual_file_system, m_input_state, m_runtime_host.ptr()));
     bind_runtime_callbacks(runtime);
     return {};
@@ -326,9 +357,24 @@ ErrorOr<void> WorldManagementSystem::initialize_runtime(WorldRuntime& runtime)
 
 void WorldManagementSystem::bind_runtime_callbacks(WorldRuntime& runtime)
 {
-    runtime.set_log_callback([this](StringView level, StringView source, StringView message) {
+    if (m_overlay_broker)
+        m_overlay_broker->connect_to_world(runtime.control_bus().port(), runtime.control_bus().capability_token());
+
+    runtime.set_log_callback([this, &runtime](StringView level, StringView source, StringView message) {
         if (m_runtime_log_callback)
             m_runtime_log_callback(level, source, message);
+
+        JsonObject data;
+        data.set("level"sv, level);
+        data.set("source"sv, source);
+        data.set("message"sv, message);
+        runtime.control_bus().send_event("log.entry"sv, data);
+    });
+
+    runtime.bridge_backend().set_selection_changed_callback([&runtime](EntityId entity) {
+        JsonObject data;
+        data.set("entity_id"sv, static_cast<u32>(entity));
+        runtime.control_bus().send_event("entity.selected"sv, data);
     });
 }
 

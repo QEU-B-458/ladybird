@@ -23,8 +23,8 @@ public:
     Session& session() { return m_world_management_system.session(); }
     Session const& session() const { return m_world_management_system.session(); }
 
-    World& active_world() { return m_world_management_system.active_world(); }
-    World const& active_world() const { return m_world_management_system.active_world(); }
+    World& active_world() { return m_world_management_system.foreground_runtime()->world(); }
+    World const& active_world() const { return m_world_management_system.foreground_runtime()->world(); }
 
     World& world() { return active_world(); }
     World const& world() const { return active_world(); }

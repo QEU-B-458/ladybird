@@ -34,6 +34,8 @@ struct WorldManifest {
     String package_name;
     String name;
     String entry_script;
+    u32 script_tick_budget_ms { 0 };
+    u32 wasm_memory_limit_mb { 64 };
     Permissions permissions;
     Networking networking;
 };
@@ -41,8 +43,14 @@ struct WorldManifest {
 struct BootstrapInfo {
     u32 world_id { 0 };
     String package_name;
+    String world_name;
     String mode;
     Vector<String> bootstrap_urls;
+    Vector<String> transports;
+    u32 protocol_version { 1 };
+    bool storage_allowed { false };
+    bool network_allowed { false };
+    bool wasm_allowed { false };
 };
 
 ErrorOr<WorldManifest> load_world_manifest(VirtualFileSystem const&, StringView manifest_path);

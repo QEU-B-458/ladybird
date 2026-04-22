@@ -29,8 +29,21 @@ void Engine::resize(int width, int height)
 
 ErrorOr<void> Engine::render()
 {
-    TRY(m_renderer.draw_world(m_world_management_system.active_world()));
-    m_world_management_system.active_world().clear_dirty_flags();
+    auto* runtime = m_world_management_system.foreground_runtime();
+    if (!runtime)
+        return {};
+
+    Optional<Error> render_error;
+    runtime->with_world_lock([&](World& world) {
+        auto result = m_renderer.draw_world(world);
+        if (result.is_error()) {
+            render_error = result.release_error();
+            return;
+        }
+        world.clear_dirty_flags();
+    });
+    if (render_error.has_value())
+        return render_error.release_value();
     return {};
 }
 

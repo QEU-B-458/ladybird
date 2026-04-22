@@ -7,9 +7,11 @@
 
 #include "BridgeBackend.h"
 #include "ScriptHost.h"
+#include "../Networking/NetworkService.h"
 #include "../Support/InputState.h"
 #include "../Support/VirtualFileSystem.h"
 #include "../World/World.h"
+#include "../World/WorldManifest.h"
 
 #include <AK/ByteString.h>
 #include <AK/Function.h>
@@ -24,31 +26,43 @@
 namespace MyceliumVR {
 
 class NetworkService;
+class WorldRuntime;
 
 class ScriptRuntime {
 public:
     explicit ScriptRuntime(ScriptHost&, World&, NetworkService&, VirtualFileSystem* = nullptr, InputState* = nullptr,
-        WorldRuntimeHost* = nullptr);
+        WorldRuntimeHost* = nullptr, WorldRuntime* = nullptr);
     ~ScriptRuntime();
 
     ErrorOr<void> initialize();
     ErrorOr<void> load_script(ByteString const& path);
     ErrorOr<void> load_control_script(ByteString const& path);
     ErrorOr<void> load_script_source(ByteBuffer source, StringView filename);
-    void update(double delta_time);
+    bool update(double delta_time);
 
     World& world() { return m_world; }
     NetworkService& network_service() { return m_network_service; }
     BridgeBackend& bridge_backend() { return m_bridge_backend; }
     BridgeBackend const& bridge_backend() const { return m_bridge_backend; }
     VirtualFileSystem* virtual_file_system() { return m_virtual_file_system; }
-    InputState* input_state() { return m_input_state; }
+    InputFrameState* input_state() { return &m_input_state_snapshot; }
+    InputFrameState const* input_state() const { return &m_input_state_snapshot; }
+    void set_input_frame_state(InputFrameState state) { m_input_state_snapshot = move(state); }
     JS::ThrowCompletionOr<JS::Value> acquire_transform_buffer(JS::Realm&, u32 capacity);
     JS::ThrowCompletionOr<JS::Value> commit_transform_buffer(JS::VM&, u32 count);
     JS::ThrowCompletionOr<JS::Value> read_text(JS::VM&, StringView path);
     JS::ThrowCompletionOr<JS::Value> write_text(JS::VM&, StringView path, StringView text);
     bool file_exists(StringView path) const;
     void set_log_callback(Function<void(StringView, StringView, StringView)> cb) { m_log_callback = move(cb); }
+    ErrorOr<String> network_bootstrap_info_json() const;
+    ErrorOr<u32> network_connect(StringView kind, StringView address);
+    ErrorOr<void> network_send(u32 connection_id, ReadonlyBytes payload, u32 flags);
+    void network_close(u32 connection_id);
+    Optional<NetworkEvent> network_poll_event();
+    Optional<String> network_receive_text(u32 connection_id);
+    bool had_uncaught_exception() const { return m_had_uncaught_exception; }
+    String const& last_exception_message() const { return m_last_exception_message; }
+    void clear_exception_state();
 
 private:
     struct ScriptEntrypoints {
@@ -66,13 +80,17 @@ private:
     NetworkService& m_network_service;
     BridgeBackend m_bridge_backend;
     VirtualFileSystem* m_virtual_file_system { nullptr };
-    InputState* m_input_state { nullptr };
+    InputState* m_input_state_source { nullptr };
+    InputFrameState m_input_state_snapshot;
+    WorldRuntime* m_world_runtime { nullptr };
     GC::Root<JS::Realm> m_realm;
     OwnPtr<JS::ExecutionContext> m_global_execution_context;
     Vector<ScriptEntrypoints> m_loaded_scripts;
     GC::Root<JS::Float32Array> m_transform_buffer;
     u32 m_transform_buffer_capacity { 0 };
     Function<void(StringView, StringView, StringView)> m_log_callback;
+    bool m_had_uncaught_exception { false };
+    String m_last_exception_message;
 };
 
 }

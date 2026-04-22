@@ -22,19 +22,11 @@ void BridgeBackend::log(String message)
 
 EntityId BridgeBackend::spawn_entity()
 {
-    if (m_supervisor_client) {
-        auto response = m_supervisor_client->send_sync<Messages::Supervisor::SpawnEntity>();
-        return static_cast<EntityId>(response->entity_id());
-    }
     return m_world.spawn_entity();
 }
 
 bool BridgeBackend::destroy_entity(EntityId entity)
 {
-    if (m_supervisor_client) {
-        auto response = m_supervisor_client->send_sync<Messages::Supervisor::DestroyEntity>(static_cast<u32>(entity));
-        return response->ok();
-    }
     return m_world.destroy_entity(entity);
 }
 
@@ -98,37 +90,21 @@ u32 BridgeBackend::commit_transform_buffer(ReadonlySpan<float> buffer, u32 count
 
 bool BridgeBackend::set_mesh(EntityId entity, String mesh)
 {
-    if (m_supervisor_client) {
-        auto response = m_supervisor_client->send_sync<Messages::Supervisor::SetMesh>(static_cast<u32>(entity), mesh);
-        return response->ok();
-    }
     return m_world.set_mesh(entity, move(mesh));
 }
 
 bool BridgeBackend::set_material(EntityId entity, String material)
 {
-    if (m_supervisor_client) {
-        auto response = m_supervisor_client->send_sync<Messages::Supervisor::SetMaterial>(static_cast<u32>(entity), material);
-        return response->ok();
-    }
     return m_world.set_material(entity, move(material));
 }
 
 bool BridgeBackend::set_normal_map(EntityId entity, String normal_map)
 {
-    if (m_supervisor_client) {
-        auto response = m_supervisor_client->send_sync<Messages::Supervisor::SetNormalMap>(static_cast<u32>(entity), normal_map);
-        return response->ok();
-    }
     return m_world.set_normal_map(entity, move(normal_map));
 }
 
 bool BridgeBackend::create_panel(EntityId entity, String url, double width, double height)
 {
-    if (m_supervisor_client) {
-        auto response = m_supervisor_client->send_sync<Messages::Supervisor::CreatePanel>(static_cast<u32>(entity), url, static_cast<float>(width), static_cast<float>(height));
-        return response->ok();
-    }
     return m_world.create_panel(entity, move(url), static_cast<float>(width), static_cast<float>(height));
 }
 
@@ -335,6 +311,7 @@ Optional<EntityComponentSnapshot> BridgeBackend::get_entity_components(EntityId 
         snap.name = MUST(String::formatted("entity_{}", static_cast<u32>(entity)));
 
     if (auto const* t = reg.try_get<Transform>(entity)) {
+        snap.attached_components.append("Transform"_string);
         snap.position[0] = t->position[0];
         snap.position[1] = t->position[1];
         snap.position[2] = t->position[2];
@@ -348,6 +325,7 @@ Optional<EntityComponentSnapshot> BridgeBackend::get_entity_components(EntityId 
     }
 
     if (auto const* mr = reg.try_get<MeshRenderer>(entity)) {
+        snap.attached_components.append("MeshRenderer"_string);
         snap.has_mesh_renderer = true;
         snap.mesh = mr->mesh;
         snap.material = mr->material;
@@ -355,12 +333,15 @@ Optional<EntityComponentSnapshot> BridgeBackend::get_entity_components(EntityId 
     }
 
     if (auto const* panel = reg.try_get<Panel>(entity)) {
+        snap.attached_components.append("Panel"_string);
         snap.has_panel = true;
+        snap.panel_url = panel->url;
         snap.panel_width = panel->width;
         snap.panel_height = panel->height;
     }
 
     if (auto const* cull = reg.try_get<CullOverride>(entity)) {
+        snap.attached_components.append("CullOverride"_string);
         snap.has_cull_override = true;
         snap.cull_mode = cull->mode;
     }
@@ -369,6 +350,25 @@ Optional<EntityComponentSnapshot> BridgeBackend::get_entity_components(EntityId 
     snap.alpha_blend = reg.any_of<AlphaBlend>(entity);
     snap.alpha_clip  = reg.any_of<AlphaClip>(entity);
     snap.alpha_hash  = reg.any_of<AlphaHash>(entity);
+
+    if (reg.any_of<Name>(entity))
+        snap.attached_components.append("Name"_string);
+    if (reg.any_of<Parent>(entity))
+        snap.attached_components.append("Parent"_string);
+    if (reg.any_of<ScriptComponent>(entity))
+        snap.attached_components.append("ScriptComponent"_string);
+    if (reg.any_of<ScriptRuntimeHandle>(entity))
+        snap.attached_components.append("ScriptRuntimeHandle"_string);
+    if (reg.any_of<Selected>(entity))
+        snap.attached_components.append("Selected"_string);
+    if (snap.is_static)
+        snap.attached_components.append("Static"_string);
+    if (snap.alpha_blend)
+        snap.attached_components.append("AlphaBlend"_string);
+    if (snap.alpha_clip)
+        snap.attached_components.append("AlphaClip"_string);
+    if (snap.alpha_hash)
+        snap.attached_components.append("AlphaHash"_string);
 
     return snap;
 }

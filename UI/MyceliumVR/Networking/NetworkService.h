@@ -50,18 +50,24 @@ public:
     void set_limits(Limits const& limits) { m_limits = limits; }
     Limits const& limits() const { return m_limits; }
 
-    ErrorOr<u32> connect(StringView kind, StringView address);
-    ErrorOr<void> send(u32 connection_id, ReadonlyBytes payload, u32 flags = 0);
-    void close(u32 connection_id);
+    ErrorOr<u32> connect(u32 world_id, StringView kind, StringView address);
+    ErrorOr<void> send(u32 world_id, u32 connection_id, ReadonlyBytes payload, u32 flags = 0);
+    void close(u32 world_id, u32 connection_id);
+    void close_world_connections(u32 world_id);
 
-    Vector<NetworkEvent> poll_events();
+    Vector<NetworkEvent> poll_events(u32 world_id);
 
 private:
+    struct ConnectionRecord {
+        u32 world_id { 0 };
+        NonnullOwnPtr<ITransport> transport;
+    };
+
     u32 allocate_connection_id();
 
     Limits m_limits;
     u32 m_next_connection_id { 1 };
-    HashMap<u32, NonnullOwnPtr<ITransport>> m_connections;
+    HashMap<u32, ConnectionRecord> m_connections;
 };
 
 }

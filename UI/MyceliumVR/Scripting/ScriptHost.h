@@ -8,6 +8,7 @@
 #include <AK/Error.h>
 #include <AK/RefPtr.h>
 #include <LibJS/Runtime/VM.h>
+#include <mutex>
 
 namespace MyceliumVR {
 
@@ -21,9 +22,11 @@ public:
     bool is_initialized() const { return m_vm; }
     JS::VM& vm();
     JS::VM const& vm() const;
+    std::mutex& vm_mutex() { return m_vm_mutex; }
 
 private:
     RefPtr<JS::VM> m_vm;
+    std::mutex m_vm_mutex;
 };
 
 }
