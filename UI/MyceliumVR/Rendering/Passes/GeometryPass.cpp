@@ -6,6 +6,7 @@
 #include "GeometryPass.h"
 #include "../Backend/VulkanDebug.h"
 #include "../Pipeline/VulkanPBRManager.h"
+#include "../../World/RenderSnapshot.h"
 
 #include <UI/MyceliumVR/Support/Profiling.h>
 
@@ -121,16 +122,244 @@ ErrorOr<void> GeometryPass::prepare(VulkanContext const& ctx, VkCommandPool)
     Vector<GroupAABBGPU> aabb_data;
     bool world_dirty = false, instances_dirty = false;
 
-    if (!m_world) {
+    if (m_snapshot.size() >= sizeof(FrameHeader)) {
+        auto const& header = *reinterpret_cast<FrameHeader const*>(m_snapshot.data());
+        
+        u8 const* snapshot_ptr = m_snapshot.data() + sizeof(FrameHeader);
+        auto const* cameras = reinterpret_cast<SnapshotCamera const*>(snapshot_ptr); snapshot_ptr += sizeof(SnapshotCamera) * header.camera_count;
+        auto const* frame_groups = reinterpret_cast<FrameDrawGroup const*>(snapshot_ptr); snapshot_ptr += sizeof(FrameDrawGroup) * header.draw_group_count;
+        auto const* snapshot_instances = reinterpret_cast<SnapshotInstance const*>(snapshot_ptr); snapshot_ptr += sizeof(SnapshotInstance) * header.instance_count;
+        auto const* snapshot_panels = reinterpret_cast<SnapshotPanelEntry const*>(snapshot_ptr); snapshot_ptr += sizeof(SnapshotPanelEntry) * header.panel_count;
+        snapshot_ptr += sizeof(SnapshotLightEntry) * header.point_light_count;
+
+        if (header.camera_count > 0 && header.primary_camera_idx < header.camera_count) {
+            auto const& cam = cameras[header.primary_camera_idx];
+            memcpy(m_camera_position, cam.position, sizeof(float) * 3);
+        }
+
+        u32 draw_group_count = header.draw_group_count;
+        StaticDrawGroup const* static_groups = nullptr;
+
+        bool needs_full_rebuild = (header.scene_revision != m_last_processed_scene_revision) || (m_vertex_buffer.buffer == VK_NULL_HANDLE);
+
+        if (needs_full_rebuild) {
+            vertices.clear();
+            m_draw_groups.clear();
+            if (m_static_scene.size() >= sizeof(StaticSceneHeader)) {
+                auto const& static_header = *reinterpret_cast<StaticSceneHeader const*>(m_static_scene.data());
+                draw_group_count = static_header.draw_group_count;
+                static_groups = reinterpret_cast<StaticDrawGroup const*>(m_static_scene.data() + sizeof(StaticSceneHeader));
+                
+                outln("GeometryPass: Rebuilding scene at revision {} ({} groups)", header.scene_revision, draw_group_count);
+                m_draw_groups.clear();
+
+                for (u32 i = 0; i < draw_group_count; ++i) {
+                    auto const& sg = static_groups[i];
+                    u32 mesh_handle = sg.mesh_handle;
+                    u32 material_handle = sg.material_handle;
+                    u8 alpha_mode = sg.alpha_mode;
+                    u8 cull_mode = sg.cull_mode;
+                    u8 has_normal_map = sg.has_normal_map;
+                    u32 sg_instance_count = 0;
+                    u32 sg_instance_offset = 0;
+
+                    if (i < header.draw_group_count) {
+                        sg_instance_count = frame_groups[i].instance_count;
+                        sg_instance_offset = frame_groups[i].instance_offset;
+                    }
+
+                    DrawGroup group;
+                    group.mesh_name = "cube"_string;
+                    if (m_mesh_handles) {
+                        if (auto mesh_path = m_mesh_handles->get(mesh_handle); mesh_path.has_value())
+                            group.mesh_name = MUST(String::from_utf8(mesh_path.value().view()));
+                    }
+
+                    group.material = "default"_string;
+                    if (m_material_handles) {
+                        if (auto mat_path = m_material_handles->get(material_handle); mat_path.has_value())
+                            group.material = MUST(String::from_utf8(mat_path.value().view()));
+                    }
+
+                    group.alpha_mode = alpha_mode;
+                    group.cull_mode = static_cast<DrawGroup::CullMode>(cull_mode);
+                    group.has_normal_map = has_normal_map != 0;
+
+                    auto mesh_result = m_mesh_library.resolve_mesh(group.mesh_name);
+                    auto const* mesh_asset = mesh_result.is_error() ? m_mesh_library.resolve_mesh("cube"_string).value() : mesh_result.value();
+
+                    group.vertex_count = static_cast<u32>(mesh_asset->positions.size() / 3);
+                    group.first_vertex = static_cast<u32>(vertices.size());
+
+                    auto const& positions = mesh_asset->positions;
+                    auto const& normals_arr = mesh_asset->normals;
+                    auto const& texcoords = mesh_asset->texcoords;
+                    auto const& tangents_arr = mesh_asset->tangents;
+                    bool const has_normals = !normals_arr.is_empty();
+                    bool const has_texcoords = !texcoords.is_empty();
+                    bool const has_tangents = !tangents_arr.is_empty();
+
+                    memcpy(group.aabb_local_min, sg.aabb_local_min, sizeof(group.aabb_local_min));
+                    memcpy(group.aabb_local_max, sg.aabb_local_max, sizeof(group.aabb_local_max));
+
+                    for (size_t tri = 0; tri < static_cast<size_t>(group.vertex_count); tri += 3) {
+                        Vec3 face_normal { 0.0f, 0.0f, 1.0f };
+                        if (!has_normals) {
+                            auto b0 = tri * 3, b1 = (tri + 1) * 3, b2 = (tri + 2) * 3;
+                            Vec3 v0 { positions[b0], positions[b0 + 1], positions[b0 + 2] };
+                            Vec3 v1 { positions[b1], positions[b1 + 1], positions[b1 + 2] };
+                            Vec3 v2 { positions[b2], positions[b2 + 1], positions[b2 + 2] };
+                            face_normal = normalize(cross(subtract(v1, v0), subtract(v2, v0)));
+                        }
+                        for (int v = 0; v < 3; ++v) {
+                            auto bi3 = (tri + static_cast<size_t>(v)) * 3;
+                            auto bi2 = (tri + static_cast<size_t>(v)) * 2;
+                            auto bi4 = (tri + static_cast<size_t>(v)) * 4;
+                            Vertex vertex {};
+                            vertex.position[0] = positions[bi3]; vertex.position[1] = positions[bi3 + 1]; vertex.position[2] = positions[bi3 + 2];
+                            vertex.color[0] = 1.0f; vertex.color[1] = 1.0f; vertex.color[2] = 1.0f;
+                            if (has_normals) {
+                                vertex.normal[0] = normals_arr[bi3]; vertex.normal[1] = normals_arr[bi3 + 1]; vertex.normal[2] = normals_arr[bi3 + 2];
+                            } else {
+                                vertex.normal[0] = face_normal.x; vertex.normal[1] = face_normal.y; vertex.normal[2] = face_normal.z;
+                            }
+                            if (has_texcoords) {
+                                vertex.uv[0] = texcoords[bi2]; vertex.uv[1] = texcoords[bi2 + 1];
+                            }
+                            if (has_tangents) {
+                                vertex.tangent[0] = tangents_arr[bi4]; vertex.tangent[1] = tangents_arr[bi4 + 1]; vertex.tangent[2] = tangents_arr[bi4 + 2]; vertex.tangent[3] = tangents_arr[bi4 + 3];
+                            }
+                            vertices.append(vertex);
+                        }
+                    }
+
+                    group.first_instance = static_cast<u32>(instance_data.size());
+                    group.instance_count = sg_instance_count;
+                    group.material_index = i;
+                    group.aabb_world_min[0] = -1e6f; group.aabb_world_min[1] = -1e6f; group.aabb_world_min[2] = -1e6f;
+                    group.aabb_world_max[0] = 1e6f;  group.aabb_world_max[1] = 1e6f;  group.aabb_world_max[2] = 1e6f;
+
+                    for (u32 j = 0; j < sg_instance_count; ++j) {
+                        auto const& si = snapshot_instances[sg_instance_offset + j];
+                        GPUInstanceData idata;
+                        memcpy(idata.world_matrix, si.transform, sizeof(float) * 16);
+                        idata.material_index = i;
+                        instance_data.append(idata);
+                    }
+
+                    m_draw_groups.append(group);
+                    indirect_cmds.append({ group.vertex_count, group.instance_count, group.first_vertex, static_cast<u32>(group.first_instance) });
+                    GroupAABBGPU aabb;
+                    memcpy(aabb.min_xyz, group.aabb_world_min, 12); aabb.min_xyz[3] = 0.0f;
+                    memcpy(aabb.max_xyz, group.aabb_world_max, 12); aabb.max_xyz[3] = 0.0f;
+                    aabb_data.append(aabb);
+                }
+                m_last_processed_scene_revision = header.scene_revision;
+                world_dirty = true;
+            } else if (m_draw_groups.is_empty()) {
+                // First frame but no static scene? Fallback to probe.
+                needs_full_rebuild = false; // Trigger fallback below
+            } else {
+                // Needs rebuild but no static scene? Keep old draw groups but update instances anyway.
+                needs_full_rebuild = false;
+            }
+        }
+        
+        if (!needs_full_rebuild) {
+            // Incremental update: transforms and instance counts only
+            for (u32 i = 0; i < m_draw_groups.size(); ++i) {
+                auto& group = m_draw_groups[i];
+                u32 sg_instance_count = 0;
+                u32 sg_instance_offset = 0;
+                
+                if (i < header.draw_group_count) {
+                    sg_instance_count = frame_groups[i].instance_count;
+                    sg_instance_offset = frame_groups[i].instance_offset;
+                }
+
+                group.first_instance = static_cast<u32>(instance_data.size());
+                group.instance_count = sg_instance_count;
+
+                for (u32 j = 0; j < sg_instance_count; ++j) {
+                    auto const& si = snapshot_instances[sg_instance_offset + j];
+                    GPUInstanceData idata;
+                    memcpy(idata.world_matrix, si.transform, sizeof(float) * 16);
+                    idata.material_index = i;
+                    instance_data.append(idata);
+                }
+
+                indirect_cmds.append({ group.vertex_count, group.instance_count, group.first_vertex, static_cast<u32>(group.first_instance) });
+                GroupAABBGPU aabb;
+                memcpy(aabb.min_xyz, group.aabb_world_min, 12); aabb.min_xyz[3] = 0.0f;
+                memcpy(aabb.max_xyz, group.aabb_world_max, 12); aabb.max_xyz[3] = 0.0f;
+                aabb_data.append(aabb);
+            }
+            instances_dirty = true;
+        }
+
+        (void)snapshot_panels; // Suppress unused warning for now
+
+        bool snapshot_has_geometry = (world_dirty || instances_dirty) ? !m_draw_groups.is_empty() : true;
+        if (world_dirty && !snapshot_has_geometry) {
+            vertices = VulkanMeshBuilder::build_probe_vertices();
+            GPUInstanceData identity {};
+            static constexpr Array<float, 16> identity_mat { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+            memcpy(identity.world_matrix, identity_mat.data(), 64);
+            identity.material_index = 0;
+            instance_data.append(identity);
+
+            DrawGroup probe_group;
+            probe_group.mesh_name = "cube"_string;
+            probe_group.material = "default"_string;
+            probe_group.vertex_count = static_cast<u32>(vertices.size());
+            probe_group.first_vertex = 0;
+            probe_group.instance_count = 1;
+            probe_group.first_instance = 0;
+            probe_group.material_index = 0;
+            probe_group.alpha_mode = 0;
+            probe_group.cull_mode = DrawGroup::CullMode::Back;
+            probe_group.has_normal_map = false;
+            m_draw_groups.append(probe_group);
+            
+            indirect_cmds.append({ probe_group.vertex_count, 1, 0, 0 });
+            GroupAABBGPU aabb;
+            for (int i = 0; i < 3; i++) { aabb.min_xyz[i] = -1.0f; aabb.max_xyz[i] = 1.0f; }
+            aabb.min_xyz[3] = 0.0f; aabb.max_xyz[3] = 0.0f;
+            aabb_data.append(aabb);
+            
+            world_dirty = true;
+        }
+    } else if (!m_world) {
         vertices = VulkanMeshBuilder::build_probe_vertices();
         GPUInstanceData identity {};
         static constexpr Array<float, 16> identity_mat { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
         memcpy(identity.world_matrix, identity_mat.data(), 64);
         identity.material_index = 0;
         instance_data.append(identity);
-        world_dirty = true;
+
+        DrawGroup probe_group;
+        probe_group.mesh_name = "cube"_string;
+        probe_group.material = "default"_string;
+        probe_group.vertex_count = static_cast<u32>(vertices.size());
+        probe_group.first_vertex = 0;
+        probe_group.instance_count = 1;
+        probe_group.first_instance = 0;
+        probe_group.material_index = 0;
+        probe_group.alpha_mode = 0;
+        probe_group.cull_mode = DrawGroup::CullMode::Back;
+        probe_group.has_normal_map = false;
         m_draw_groups.clear();
-    } else if (m_world->layout_dirty() || m_vertex_buffer.buffer == VK_NULL_HANDLE) {
+        m_draw_groups.append(probe_group);
+
+        indirect_cmds.append({ probe_group.vertex_count, 1, 0, 0 });
+        GroupAABBGPU aabb;
+        for (int i = 0; i < 3; i++) { aabb.min_xyz[i] = -1.0f; aabb.max_xyz[i] = 1.0f; }
+        aabb.min_xyz[3] = 0.0f; aabb.max_xyz[3] = 0.0f;
+        aabb_data.append(aabb);
+
+        world_dirty = true;
+    }
+ else if (m_world->layout_dirty() || m_vertex_buffer.buffer == VK_NULL_HANDLE) {
         m_draw_groups.clear();
         VulkanMeshBuilder::build_world_instanced(*m_world, m_mesh_library, vertices, instance_data, m_draw_groups);
         for (auto const& g : m_draw_groups) {
@@ -190,8 +419,8 @@ ErrorOr<void> GeometryPass::prepare(VulkanContext const& ctx, VkCommandPool)
             if (m_file_system) {
                 TRY(VulkanPBRManager::update_material_descriptor_set(ctx.device(), m_texture_library, m_material_library, *m_file_system, m_draw_groups, m_flat_normal_texture, m_fallback_black_texture, m_bindless_set, m_pbr_descriptor_sets));
             }
-            update_material_ssbo(ctx);
         }
+        update_material_ssbo(ctx);
     }
 
     // Stage geometry data to host-visible buffers (CPU only — no GPU submission).
@@ -227,6 +456,7 @@ ErrorOr<void> GeometryPass::prepare(VulkanContext const& ctx, VkCommandPool)
         m_geometry_upload_pending = true;
     } else if (instances_dirty) {
         m_instance_pending_size = TRY(stage_buffer(ctx, instance_data, m_instance_staging, m_instance_buffer, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT));
+        m_indirect_pending_size = TRY(stage_buffer(ctx, indirect_cmds, m_indirect_staging, m_indirect_ref_buffer, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT));
         m_aabb_pending_size     = TRY(stage_buffer(ctx, aabb_data,     m_aabb_world_staging, m_aabb_world_buffer, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT));
         m_geometry_upload_pending = true;
     }
@@ -344,6 +574,7 @@ void GeometryPass::update_light_ubo(VulkanContext const& ctx)
     ubo.sun_direction[0] = m_scene_light.light_to_xyz[0];
     ubo.sun_direction[1] = m_scene_light.light_to_xyz[1];
     ubo.sun_direction[2] = m_scene_light.light_to_xyz[2];
+    ubo.sun_direction[3] = 0.0f;
     ubo.sun_color[0] = m_scene_light.light_rgb[0];
     ubo.sun_color[1] = m_scene_light.light_rgb[1];
     ubo.sun_color[2] = m_scene_light.light_rgb[2];
@@ -351,6 +582,7 @@ void GeometryPass::update_light_ubo(VulkanContext const& ctx)
     ubo.eye_position[0] = m_camera_position[0];
     ubo.eye_position[1] = m_camera_position[1];
     ubo.eye_position[2] = m_camera_position[2];
+    ubo.eye_position[3] = 1.0f;
     ubo.light_params[0] = m_scene_light.point_light_count;
     ubo.light_params[1] = m_graph_bindings.shadow_map.value != 0 ? m_shadow_quality : 0;
     ubo.light_params[2] = static_cast<int32_t>(m_screen_w);

@@ -351,7 +351,11 @@ ErrorOr<VulkanPanelPipeline> VulkanPipelineManager::create_panel_pipeline(VkDevi
         .basePipelineHandle = VK_NULL_HANDLE, 
         .basePipelineIndex = -1 
     };
-    TRY(check_vulkan_result(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &p.pipeline), "vkCreateGraphicsPipelines failed"sv));
+    TRY(check_vulkan_result(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &p.panel_pipeline), "vkCreateGraphicsPipelines panel failed"sv));
+
+    ds.depthTestEnable = VK_FALSE;
+    ds.depthWriteEnable = VK_FALSE;
+    TRY(check_vulkan_result(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &p.overlay_pipeline), "vkCreateGraphicsPipelines overlay failed"sv));
     return p;
 }
 

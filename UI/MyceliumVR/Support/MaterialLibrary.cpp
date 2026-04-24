@@ -87,4 +87,10 @@ MaterialAsset const* MaterialLibrary::resolve(StringView name) const
     return &it->value;
 }
 
+void MaterialLibrary::unload_world_resources(u32)
+{
+    // Clear entire cache for now.
+    m_cache.clear();
+}
+
 }

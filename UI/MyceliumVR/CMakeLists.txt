@@ -8,17 +8,116 @@ find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_program(SPIRV_AS_EXECUTABLE NAMES spirv-as)
 find_package(unofficial-shaderc CONFIG QUIET)
 
+compile_ipc(IPC/WorldHost.ipc   "${CMAKE_CURRENT_BINARY_DIR}/WorldHostEndpoint.h")
+compile_ipc(IPC/WorldClient.ipc "${CMAKE_CURRENT_BINARY_DIR}/WorldClientEndpoint.h")
+
+# ── Shared sources ──────────────────────────────────────────────────────────
+set(MYCELIUM_WORLD_SOURCES
+    ProcessTransport/TransportTypes.h
+    ProcessTransport/IWorldBootstrapChannel.h
+    ProcessTransport/IWakeSignal.h
+    ProcessTransport/ISharedMemoryRegion.h
+    ProcessTransport/IInputQueue.h
+    ProcessTransport/IFrameMailbox.h
+    ProcessTransport/ITransportStatsProvider.h
+    ProcessTransport/WorldProcessTransportHost.h
+    ProcessTransport/WorldProcessTransportClient.h
+    ProcessTransport/Linux/LinuxSyscalls.h
+    ProcessTransport/Linux/LinuxSyscalls.cpp
+    ProcessTransport/Linux/LinuxBootstrapChannel.h
+    ProcessTransport/Linux/LinuxBootstrapChannel.cpp
+    ProcessTransport/Linux/LinuxWakeSignal.h
+    ProcessTransport/Linux/LinuxWakeSignal.cpp
+    ProcessTransport/Linux/LinuxSharedMemoryRegion.h
+    ProcessTransport/Linux/LinuxSharedMemoryRegion.cpp
+    ProcessTransport/Linux/LinuxInputQueue.h
+    ProcessTransport/Linux/LinuxInputQueue.cpp
+    ProcessTransport/Linux/LinuxFrameMailbox.h
+    ProcessTransport/Linux/LinuxFrameMailbox.cpp
+    ProcessTransport/Linux/LinuxTransportFactory.h
+    ProcessTransport/Linux/LinuxTransportFactory.cpp
+    World/World.h
+    World/World.cpp
+    World/WorldManifest.h
+    World/WorldManifest.cpp
+    World/WorldRuntime.h
+    World/WorldRuntime.cpp
+    World/WorldRuntimeHost.h
+    World/SubprocessWorldRuntimeHost.h
+    World/SubprocessWorldRuntimeHost.cpp
+    Scripting/BridgeBackend.h
+    Scripting/BridgeBackend.cpp
+    Scripting/BridgeFunctions.h
+    Scripting/BridgeFunctions.cpp
+    Scripting/BridgeRegistry.h
+    Scripting/BridgeRegistry.cpp
+    Scripting/ScriptHost.h
+    Scripting/ScriptHost.cpp
+    Scripting/ScriptRuntime.h
+    Scripting/ScriptRuntime.cpp
+    Scripting/WasmRuntime.h
+    Scripting/WasmRuntime.cpp
+    Networking/NetworkService.h
+    Networking/NetworkService.cpp
+    Networking/ControlBusServer.h
+    Networking/ControlBusServer.cpp
+    Networking/ControlBusClient.h
+    Networking/ControlBusClient.cpp
+    Networking/WebSocketTransport.h
+    Networking/WebSocketTransport.cpp
+    Support/VirtualFileSystem.h
+    Support/VirtualFileSystem.cpp
+    Support/InputState.h
+    Support/InputState.cpp
+    Support/GltfLoader.cpp
+    World/RenderSnapshot.h
+)
+
+# ── MyceliumWorld process binary ─────────────────────────────────────────────
+add_executable(MyceliumWorld
+    WorldProcessMain.cpp
+    World/WorldClientConnection.h
+    World/WorldClientConnection.cpp
+    ${MYCELIUM_WORLD_SOURCES}
+    "${CMAKE_CURRENT_BINARY_DIR}/WorldHostEndpoint.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/WorldClientEndpoint.h"
+)
+
+target_link_libraries(MyceliumWorld PRIVATE
+    EnTT::EnTT
+    LibJS
+    LibWasm
+    LibGC
+    LibCore
+    LibIPC
+    LibCrypto
+    LibMain
+    LibURL
+    LibWebSocket
+    SDL3::SDL3
+)
+
+target_compile_definitions(MyceliumWorld PRIVATE
+    MYCELIUM_WORLD_PROCESS
+)
+
+target_include_directories(MyceliumWorld PRIVATE
+    ${LADYBIRD_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+# ── Host binary ────────────────────────────────────────────────────────────
 add_executable(ladybird
     main.cpp
     Application.h
+    "${CMAKE_CURRENT_BINARY_DIR}/WorldHostEndpoint.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/WorldClientEndpoint.h"
     Engine/Engine.h
     Engine/Engine.cpp
     Rendering/Renderer.h
     Rendering/Renderer.cpp
     Rendering/Web/OverlayManager.h
     Rendering/Web/OverlayManager.cpp
-    Rendering/Web/UIOverlayBroker.h
-    Rendering/Web/UIOverlayBroker.cpp
     Rendering/Backend/VulkanProbe.h
     Rendering/Backend/VulkanProbe.cpp
     Rendering/Pipeline/TextureLibrary.h
@@ -32,6 +131,8 @@ add_executable(ladybird
     Rendering/Passes/GeometryPass.cpp
     Rendering/Passes/ShadowPass.h
     Rendering/Passes/ShadowPass.cpp
+    Rendering/Passes/PostProcessPass.h
+    Rendering/Passes/PostProcessPass.cpp
     Rendering/Passes/UIPanelPass.h
     Rendering/Passes/UIPanelPass.cpp
     Rendering/Passes/ComputeCullPass.h
@@ -61,20 +162,8 @@ add_executable(ladybird
     Rendering/Web/WebViewManager.cpp
     Rendering/Web/WebContentView.h
     Rendering/Web/WebContentView.cpp
-    Scripting/BridgeBackend.h
-    Scripting/BridgeBackend.cpp
-    Scripting/BridgeFunctions.h
-    Scripting/BridgeFunctions.cpp
-    Scripting/BridgeRegistry.h
-    Scripting/BridgeRegistry.cpp
     Scripting/SDKGenerator.h
     Scripting/SDKGenerator.cpp
-    Scripting/ScriptHost.h
-    Scripting/ScriptHost.cpp
-    Scripting/ScriptRuntime.h
-    Scripting/ScriptRuntime.cpp
-    Scripting/WasmRuntime.h
-    Scripting/WasmRuntime.cpp
     Support/ShaderCompiler.h
     Support/ShaderCompiler.cpp
     Support/GltfLoader.h
@@ -83,32 +172,30 @@ add_executable(ladybird
     Support/MeshLibrary.cpp
     Support/MaterialLibrary.h
     Support/MaterialLibrary.cpp
-    Support/InputState.h
-    Support/InputState.cpp
-    Support/VirtualFileSystem.h
-    Support/VirtualFileSystem.cpp
-    Networking/NetworkService.h
-    Networking/NetworkService.cpp
-    Networking/ControlBusServer.h
-    Networking/ControlBusServer.cpp
-    Networking/ControlBusClient.h
-    Networking/ControlBusClient.cpp
-    Networking/WebSocketTransport.h
-    Networking/WebSocketTransport.cpp
-    World/WorldRuntimeHost.h
     World/ProcessLocalWorldRuntimeHost.h
     World/ProcessLocalWorldRuntimeHost.cpp
+    World/WorldHostConnection.h
+    World/WorldHostConnection.cpp
     World/Session.h
     World/Session.cpp
     World/WorldManagementSystem.h
     World/WorldManagementSystem.cpp
-    World/WorldManifest.h
-    World/WorldManifest.cpp
-    World/WorldRuntime.h
-    World/WorldRuntime.cpp
-    World/World.h
-    World/World.cpp
+    ${MYCELIUM_WORLD_SOURCES}
 )
+
+# ... (omitting some lines)
+
+if (HAS_VULKAN)
+    # ...
+    add_dependencies(ladybird myceliumvr_shaders)
+    add_dependencies(MyceliumWorld myceliumvr_shaders) # World process might also need them for VFS
+    target_compile_definitions(ladybird PRIVATE
+        MYCELIUMVR_SHADER_DIRECTORY="${MYCELIUMVR_SHADER_OUTPUT_DIR}"
+        MYCELIUMVR_SHADER_SOURCE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/Shaders"
+        MYCELIUM_WORLD_BINARY_NAME="MyceliumWorld"
+    )
+endif()
+
 
 set_source_files_properties(
     Rendering/Renderer.cpp
@@ -116,6 +203,7 @@ set_source_files_properties(
     Rendering/Passes/DepthPrepass.cpp
     Rendering/Passes/GeometryPass.cpp
     Rendering/Passes/ShadowPass.cpp
+    Rendering/Passes/PostProcessPass.cpp
     Rendering/Passes/UIPanelPass.cpp
     Rendering/Backend/VulkanContext.cpp
     Rendering/Backend/VulkanDebug.cpp
@@ -159,10 +247,6 @@ if (HAS_VULKAN)
     )
 
     add_dependencies(ladybird myceliumvr_shaders)
-    target_compile_definitions(ladybird PRIVATE
-        MYCELIUMVR_SHADER_DIRECTORY="${MYCELIUMVR_SHADER_OUTPUT_DIR}"
-        MYCELIUMVR_SHADER_SOURCE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/Shaders"
-    )
 endif()
 
 target_link_libraries(ladybird PRIVATE
@@ -205,9 +289,11 @@ if (TARGET Tracy::TracyClient)
 
     if (MYCELIUMVR_TRACY)
         target_link_libraries(ladybird PRIVATE Tracy::TracyClient)
+        target_link_libraries(MyceliumWorld PRIVATE Tracy::TracyClient)
         # TRACY_ON_DEMAND must match the vcpkg "on-demand" feature used to compile
         # TracyClient.cpp — a mismatch causes undefined behaviour at runtime.
         target_compile_definitions(ladybird PRIVATE TRACY_ENABLE=1 TRACY_ON_DEMAND=1)
+        target_compile_definitions(MyceliumWorld PRIVATE TRACY_ENABLE=1 TRACY_ON_DEMAND=1)
         if (CMAKE_BUILD_TYPE STREQUAL "Debug")
             message(STATUS "Tracy profiler enabled for MyceliumVR (on-demand, debug — connect profiler to start capturing)")
         else()

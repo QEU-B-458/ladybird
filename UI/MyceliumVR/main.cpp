@@ -5,9 +5,8 @@
 
 #include "Application.h"
 #include "Engine/Engine.h"
-#include "Rendering/Web/UIOverlayBroker.h"
+#include "Rendering/Web/OverlayManager.h"
 #include "Rendering/Backend/VulkanProbe.h"
-#include "Rendering/Web/WebViewManager.h"
 #include "Scripting/SDKGenerator.h"
 #include "Support/InputState.h"
 #include "Support/VirtualFileSystem.h"
@@ -46,6 +45,14 @@ static MyceliumVR::ShadowQuality parse_shadow_quality(StringView value)
     if (*parsed > MyceliumVR::max_shadow_quality)
         return MyceliumVR::max_shadow_quality;
     return *parsed;
+}
+
+static bool brute_force_overlay_sync_enabled()
+{
+    auto value = Core::Environment::get("MYCELIUMVR_OVERLAY_BRUTE_FORCE_SYNC"sv);
+    if (!value.has_value())
+        return false;
+    return value.value() == "1"sv || value.value().equals_ignoring_ascii_case("true"sv);
 }
 
 ErrorOr<int> ladybird_main(Main::Arguments arguments)
@@ -115,11 +122,17 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     MyceliumVR::VirtualFileSystem virtual_file_system;
     MyceliumVR::InputState input_state;
     MyceliumVR::Engine engine(*window, &virtual_file_system);
+    engine.world_management_system().set_in_process_mode(!app->subprocess_mode_requested());
     TRY(engine.initialize_world_management_system(&virtual_file_system, &input_state));
     engine.set_shadow_quality(parse_shadow_quality(app->shadow_quality()));
 
-    MyceliumVR::UIOverlayBroker overlay_broker;
-    engine.world_management_system().set_overlay_broker(&overlay_broker);
+    auto get_window_pixel_size = [&]() {
+        int drawable_width = 0;
+        int drawable_height = 0;
+        if (!SDL_GetWindowSizeInPixels(window, &drawable_width, &drawable_height))
+            SDL_GetWindowSize(window, &drawable_width, &drawable_height);
+        return AK::Array<int, 2> { drawable_width, drawable_height };
+    };
 
     TRY(engine.world_management_system().boot({
         .world_path = ByteString(app->world_path()),
@@ -128,13 +141,15 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         .has_script_path_override = app->has_script_path_override(),
     }));
 
-    MyceliumVR::WebViewManager web_view_manager;
     if (auto* runtime = engine.world_management_system().foreground_runtime()) {
         runtime->with_world_lock([&](auto& world) {
-            web_view_manager.sync_world(world);
+            engine.renderer().sync_web_views(runtime->id(), world);
         });
     }
     outln("WebViewManager is running for in-world panel textures.");
+    bool const force_overlay_device_idle = brute_force_overlay_sync_enabled();
+    if (force_overlay_device_idle)
+        outln("Overlay brute-force sync enabled: device idle before sampling external overlay image.");
     bool window_has_focus = true;
 
         outln("Loading window UI and managed in-world webviews.");
@@ -149,28 +164,30 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
             Core::EventLoop::current().quit(0);
         };
         auto update_mouse_capture = [&]() {
-            auto should_capture_mouse = window_has_focus && !overlay_broker.is_focused();
+            auto should_capture_mouse = window_has_focus && !engine.world_management_system().overlay_manager().is_focused();
             set_mouse_capture(should_capture_mouse);
         };
         auto sync_window_surfaces = [&](Optional<SDL_Event> const& resize_event = {}) -> ErrorOr<void> {
             int drawable_width = 0;
             int drawable_height = 0;
-            if (resize_event.has_value() && (resize_event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || resize_event->type == SDL_EVENT_WINDOW_RESIZED)) {
+            if (resize_event.has_value() && resize_event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
                 drawable_width = resize_event->window.data1;
                 drawable_height = resize_event->window.data2;
             }
             if (drawable_width <= 0 || drawable_height <= 0) {
-                if (!SDL_GetWindowSizeInPixels(window, &drawable_width, &drawable_height))
-                    SDL_GetWindowSize(window, &drawable_width, &drawable_height);
+                auto window_size = get_window_pixel_size();
+                drawable_width = window_size[0];
+                drawable_height = window_size[1];
             }
             if (drawable_width <= 0 || drawable_height <= 0)
                 return {};
             engine.resize(drawable_width, drawable_height);
-            web_view_manager.resize(drawable_width, drawable_height);
-            if (!overlay_broker.is_initialized())
-                TRY(overlay_broker.initialize(drawable_width, drawable_height, engine.supports_external_image_import(), engine.vulkan_device(), engine, engine.world_management_system(), &virtual_file_system));
-            else
-                overlay_broker.resize(drawable_width, drawable_height);
+            if (!engine.world_management_system().overlay_manager().is_initialized()) {
+                TRY(engine.world_management_system().overlay_manager().initialize(drawable_width, drawable_height, engine.supports_external_image_import(), engine.vulkan_device(), engine, engine.world_management_system(), &virtual_file_system));
+                engine.world_management_system().rebind_foreground_runtime_callbacks();
+            } else {
+                engine.world_management_system().overlay_manager().resize(drawable_width, drawable_height);
+            }
             return {};
         };
         update_mouse_capture();
@@ -200,12 +217,12 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
                     if (event.type == SDL_EVENT_QUIT)
                         request_shutdown();
                     if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F1) {
-                        overlay_broker.toggle_visibility();
+                        engine.world_management_system().overlay_manager().toggle_visibility();
                         update_mouse_capture();
                         continue;
                     }
                     if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F2) {
-                        overlay_broker.toggle_focus();
+                        engine.world_management_system().overlay_manager().toggle_focus();
                         update_mouse_capture();
                         continue;
                     }
@@ -222,13 +239,14 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
                         update_mouse_capture();
                     }
 
-                    auto overlay_consumes_input = overlay_broker.should_route_input(event);
-                    if (!overlay_consumes_input)
-                        input_state.handle_sdl_event(event);
+                    auto overlay_consumes_input = engine.world_management_system().overlay_manager().should_route_input(event);
+                    auto overlay_has_exclusive_input = overlay_consumes_input && engine.world_management_system().overlay_manager().is_focused();
 
-                    if (!overlay_consumes_input)
-                        web_view_manager.handle_sdl_event(event);
-                    overlay_broker.handle_sdl_event(event);
+                    input_state.handle_sdl_event(event);
+
+                    if (!overlay_has_exclusive_input)
+                        engine.renderer().handle_web_view_event(event);
+                    engine.world_management_system().overlay_manager().handle_sdl_event(event);
                 }
             }
 
@@ -243,43 +261,25 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
             auto fps = delta_time > 0.0 ? (1.0 / delta_time) : 0.0;
             if (auto* runtime = engine.world_management_system().foreground_runtime()) {
                 runtime->with_world_lock([&](auto& world) {
-                    web_view_manager.sync_world(world);
+                    engine.renderer().sync_web_views(runtime->id(), world);
                 });
             }
-            overlay_broker.tick(fps, delta_time * 1000.0);
+            engine.world_management_system().overlay_manager().tick(fps, delta_time * 1000.0);
 
-            if (web_view_manager.has_active_panel()) {
-                if (auto snapshot = TRY(web_view_manager.snapshot_active_panel_if_needed()); snapshot.has_value())
-                    engine.renderer().set_panel_bitmap_view({
-                        .bitmap = snapshot->bitmap,
-                        .width = static_cast<u32>(snapshot->width),
-                        .height = static_cast<u32>(snapshot->height),
-                    });
-            } else {
-                engine.renderer().clear_panel_bitmap();
-            }
-
-            if (!overlay_broker.is_initialized() || !overlay_broker.is_visible()) {
-                engine.renderer().clear_overlay_bitmap();
-                engine.renderer().clear_external_overlay();
-            } else if (overlay_broker.has_overlay_vulkan_image()) {
-                // Zero-copy path: externally-imported VkImage is sampled directly.
+            auto& overlay = engine.world_management_system().overlay_manager();
+            if (overlay.is_initialized() && overlay.is_visible() && overlay.has_overlay_vulkan_image()) {
+                if (force_overlay_device_idle)
+                    engine.renderer().wait_for_device_idle();
                 engine.renderer().set_external_overlay_image(
-                    overlay_broker.overlay_vulkan_image(),
-                    overlay_broker.overlay_vulkan_width(),
-                    overlay_broker.overlay_vulkan_height());
-            } else if (auto overlay_view = TRY(overlay_broker.snapshot_overlay_view()); overlay_view.has_value()) {
-                // CPU fallback path: upload the bitmap to a staging buffer.
+                    overlay.overlay_vulkan_image(),
+                    overlay.overlay_vulkan_width(),
+                    overlay.overlay_vulkan_height());
+            } else {
                 engine.renderer().clear_external_overlay();
-                engine.renderer().set_overlay_bitmap_view({
-                    .bitmap = overlay_view->bitmap,
-                    .width = static_cast<u32>(overlay_view->width),
-                    .height = static_cast<u32>(overlay_view->height),
-                });
             }
 
             TRY(engine.render());
-            overlay_broker.post_render();
+            engine.world_management_system().overlay_manager().post_render();
 
 #if defined(TRACY_ENABLE)
             FrameMark;

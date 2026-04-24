@@ -218,13 +218,16 @@ struct VulkanDepthPipeline {
 struct VulkanPanelPipeline {
     VkDescriptorSetLayout layout { VK_NULL_HANDLE };
     VkPipelineLayout pipeline_layout { VK_NULL_HANDLE };
-    VkPipeline pipeline { VK_NULL_HANDLE };
+    VkPipeline panel_pipeline { VK_NULL_HANDLE };
+    VkPipeline overlay_pipeline { VK_NULL_HANDLE };
 
     void destroy(VkDevice device) {
-        if (pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, pipeline, nullptr);
+        if (panel_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, panel_pipeline, nullptr);
+        if (overlay_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, overlay_pipeline, nullptr);
         if (pipeline_layout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
         if (layout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device, layout, nullptr);
-        pipeline = VK_NULL_HANDLE;
+        panel_pipeline = VK_NULL_HANDLE;
+        overlay_pipeline = VK_NULL_HANDLE;
         pipeline_layout = VK_NULL_HANDLE;
         layout = VK_NULL_HANDLE;
     }

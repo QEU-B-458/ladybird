@@ -22,6 +22,9 @@
 #    define ZoneScopedN(name)
 #    define ZoneText(text, size)
 #    define FrameMark
+#    define FrameMarkNamed(name)
+#    define FrameMarkStart(name)
+#    define FrameMarkEnd(name)
 #    define TracyVkContext(...) nullptr
 #    define TracyVkDestroy(ctx)
 #    define TracyVkCollect(ctx, cmd)

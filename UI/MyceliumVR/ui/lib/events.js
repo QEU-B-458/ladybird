@@ -29,6 +29,7 @@ document.addEventListener('click', function (e) {
     case 'set-world':
       e.stopPropagation();
       setState({ world: value, worldMenuOpen: false });
+      document.title = 'mvr:switch_world:' + value;
       break;
 
     case 'select':
@@ -66,6 +67,10 @@ document.addEventListener('click', function (e) {
 
     case 'ctab':
       setState({ consoleTab: el.dataset.tab });
+      break;
+
+    case 'ltab':
+      setState({ leftTab: el.dataset.tab });
       break;
 
     case 'toggle-tweaks':

@@ -69,6 +69,7 @@ public:
 
     // Look up a material by name. Returns nullptr if the name is not registered.
     MaterialAsset const* resolve(StringView name) const;
+    void unload_world_resources(u32 world_id);
 
 private:
     HashMap<String, MaterialAsset> m_cache;

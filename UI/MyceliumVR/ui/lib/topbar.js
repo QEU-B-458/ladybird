@@ -7,14 +7,23 @@ function renderTopbar() {
 
   var worldMenu = '';
   if (state.worldMenuOpen) {
+    var loadedWorlds = WORLDS.filter(function(w) { return w.is_running || w.is_active; });
+    
     worldMenu = '<div class="world-menu">' +
-      WORLDS.map(function (w) {
-        return '<button data-action="set-world" data-value="' + w.id + '" class="' + (w.id === state.world ? 'active' : '') + '">' +
-          w.id + ' <span style="color:var(--fg-4);margin-left:6px">\u00b7 ' + w.hint + '</span>' +
-        '</button>';
-      }).join('') +
+      (loadedWorlds.length === 0 
+        ? '<div style="padding:10px;color:var(--fg-4);font-size:10px;text-align:center">No background worlds loaded</div>'
+        : loadedWorlds.map(function (w) {
+            var status = w.is_active ? 'active' : 'running';
+            return '<button data-action="set-world" data-value="' + w.path + '" class="' + status + '">' +
+              '<span>' + w.id + '</span>' +
+              '<span style="color:var(--fg-4);margin-left:6px;font-size:0.8em">\u00b7 ' + w.hint + '</span>' +
+              (w.is_active ? ' <span class="badge">ACTIVE</span>' : ' <span class="badge">BG</span>') +
+            '</button>';
+          }).join('')) +
       '<div class="sep"></div>' +
-      '<button data-action="noop"><span style="color:var(--fg-3)">+ mount folder\u2026</span></button>' +
+      '<button data-action="ltab" data-tab="browser" onclick="setState({worldMenuOpen:false})">' +
+        '<span style="color:var(--accent)">+ load new world\u2026</span>' +
+      '</button>' +
     '</div>';
   }
 

@@ -146,8 +146,23 @@ void ViewImplementation::server_did_paint(Badge<WebContentClient>, i32 bitmap_id
         m_backup_shared_image_buffer = nullptr;
         if (on_ready_to_paint)
             on_ready_to_paint();
+        if (m_automatic_ready_to_paint_acks_enabled) {
+            client().async_ready_to_paint(page_id());
+        } else {
+            ++m_pending_ready_to_paint_acks;
+        }
+        return;
     }
 
+    client().async_ready_to_paint(page_id());
+}
+
+void ViewImplementation::acknowledge_ready_to_paint()
+{
+    if (m_pending_ready_to_paint_acks == 0)
+        return;
+
+    --m_pending_ready_to_paint_acks;
     client().async_ready_to_paint(page_id());
 }
 

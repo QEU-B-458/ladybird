@@ -9,6 +9,16 @@
 
 namespace MyceliumVR {
 
+struct SerializedInputFrameState {
+    Array<u8, SDL_SCANCODE_COUNT> keys_down {};
+    Array<u8, SDL_SCANCODE_COUNT> keys_pressed {};
+    Array<u8, 8> mouse_buttons_down {};
+    float mouse_delta_x { 0.0f };
+    float mouse_delta_y { 0.0f };
+    float wheel_delta_x { 0.0f };
+    float wheel_delta_y { 0.0f };
+};
+
 bool InputFrameState::key_down(SDL_Scancode scancode) const
 {
     if (scancode >= keys_down.size())
@@ -134,6 +144,43 @@ bool InputState::consume_key_press(SDL_Scancode scancode)
     auto pressed = m_keys_pressed[scancode];
     m_keys_pressed[scancode] = false;
     return pressed;
+}
+
+ErrorOr<ByteBuffer> serialize_input_frame_state(InputFrameState const& state)
+{
+    auto buffer = TRY(ByteBuffer::create_uninitialized(sizeof(SerializedInputFrameState)));
+    auto* wire = reinterpret_cast<SerializedInputFrameState*>(buffer.data());
+    for (size_t i = 0; i < state.keys_down.size(); ++i)
+        wire->keys_down[i] = state.keys_down[i] ? 1 : 0;
+    for (size_t i = 0; i < state.keys_pressed.size(); ++i)
+        wire->keys_pressed[i] = state.keys_pressed[i] ? 1 : 0;
+    for (size_t i = 0; i < state.mouse_buttons_down.size(); ++i)
+        wire->mouse_buttons_down[i] = state.mouse_buttons_down[i] ? 1 : 0;
+    wire->mouse_delta_x = state.mouse_delta_x;
+    wire->mouse_delta_y = state.mouse_delta_y;
+    wire->wheel_delta_x = state.wheel_delta_x;
+    wire->wheel_delta_y = state.wheel_delta_y;
+    return buffer;
+}
+
+ErrorOr<InputFrameState> deserialize_input_frame_state(ReadonlyBytes bytes)
+{
+    if (bytes.size() != sizeof(SerializedInputFrameState))
+        return Error::from_string_literal("Serialized input state has invalid size");
+
+    auto const& wire = *reinterpret_cast<SerializedInputFrameState const*>(bytes.data());
+    InputFrameState state;
+    for (size_t i = 0; i < state.keys_down.size(); ++i)
+        state.keys_down[i] = wire.keys_down[i] != 0;
+    for (size_t i = 0; i < state.keys_pressed.size(); ++i)
+        state.keys_pressed[i] = wire.keys_pressed[i] != 0;
+    for (size_t i = 0; i < state.mouse_buttons_down.size(); ++i)
+        state.mouse_buttons_down[i] = wire.mouse_buttons_down[i] != 0;
+    state.mouse_delta_x = wire.mouse_delta_x;
+    state.mouse_delta_y = wire.mouse_delta_y;
+    state.wheel_delta_x = wire.wheel_delta_x;
+    state.wheel_delta_y = wire.wheel_delta_y;
+    return state;
 }
 
 }

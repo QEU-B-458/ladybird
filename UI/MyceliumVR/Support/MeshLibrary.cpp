@@ -46,6 +46,13 @@ ErrorOr<MeshAsset const*> MeshLibrary::resolve_mesh(String const& mesh_name)
     return &m_cached_meshes.find(mesh_name)->value;
 }
 
+void MeshLibrary::unload_world_resources(u32)
+{
+    // For now, we'll just clear the entire cache to be safe.
+    // In a future update, we can use the world_id to selectively clear.
+    m_cached_meshes.clear();
+}
+
 ErrorOr<MeshAsset> MeshLibrary::load_mesh(String const& mesh_name)
 {
     if (mesh_name.is_empty() || mesh_name == "cube"_string)

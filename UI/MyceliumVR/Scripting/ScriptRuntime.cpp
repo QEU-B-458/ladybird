@@ -68,7 +68,7 @@ private:
 
 GC_DEFINE_ALLOCATOR(MyceliumGlobalObject);
 
-ScriptRuntime::ScriptRuntime(ScriptHost& script_host, World& world, NetworkService& network_service, VirtualFileSystem* virtual_file_system, InputState* input_state, WorldRuntimeHost* runtime_host, WorldRuntime* world_runtime)
+ScriptRuntime::ScriptRuntime(ScriptHost& script_host, World& world, NetworkService* network_service, VirtualFileSystem* virtual_file_system, InputState* input_state, WorldRuntimeHost* runtime_host, WorldRuntime* world_runtime)
     : m_script_host(script_host)
     , m_world(world)
     , m_network_service(network_service)
@@ -182,6 +182,30 @@ ErrorOr<void> ScriptRuntime::load_script_source(ByteBuffer source, StringView fi
     return {};
 }
 
+ErrorOr<String, String> ScriptRuntime::run_script(StringView source, StringView filename)
+{
+    VERIFY(m_realm);
+    auto& vm = m_script_host.vm();
+
+    auto script_or_errors = JS::Script::parse(source, *m_realm, filename);
+    if (script_or_errors.is_error()) {
+        auto errors = script_or_errors.release_error();
+        return errors[0].to_string();
+    }
+
+    vm.push_execution_context(*m_global_execution_context);
+    auto result = vm.bytecode_interpreter().run(script_or_errors.release_value());
+    vm.pop_execution_context();
+
+    if (result.is_error()) {
+        auto exception = result.release_error();
+        return exception.value().to_string_without_side_effects();
+    }
+
+    auto value = result.release_value();
+    return value.to_string_without_side_effects();
+}
+
 bool ScriptRuntime::update(double delta_time)
 {
 #if defined(TRACY_ENABLE)
@@ -288,23 +312,23 @@ ErrorOr<String> ScriptRuntime::network_bootstrap_info_json() const
 
 ErrorOr<u32> ScriptRuntime::network_connect(StringView kind, StringView address)
 {
-    if (!m_world_runtime)
+    if (!m_world_runtime || !m_network_service)
         return Error::from_string_literal("Networking is unavailable outside a world runtime");
-    return m_network_service.connect(m_world_runtime->id(), kind, address);
+    return m_network_service->connect(m_world_runtime->id(), kind, address);
 }
 
 ErrorOr<void> ScriptRuntime::network_send(u32 connection_id, ReadonlyBytes payload, u32 flags)
 {
-    if (!m_world_runtime)
+    if (!m_world_runtime || !m_network_service)
         return Error::from_string_literal("Networking is unavailable outside a world runtime");
-    return m_network_service.send(m_world_runtime->id(), connection_id, payload, flags);
+    return m_network_service->send(m_world_runtime->id(), connection_id, payload, flags);
 }
 
 void ScriptRuntime::network_close(u32 connection_id)
 {
-    if (!m_world_runtime)
+    if (!m_world_runtime || !m_network_service)
         return;
-    m_network_service.close(m_world_runtime->id(), connection_id);
+    m_network_service->close(m_world_runtime->id(), connection_id);
 }
 
 Optional<NetworkEvent> ScriptRuntime::network_poll_event()

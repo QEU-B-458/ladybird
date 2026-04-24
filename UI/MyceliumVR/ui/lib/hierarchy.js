@@ -35,16 +35,22 @@ function renderHierarchy(container) {
   if (!container._built) {
     container.innerHTML =
       '<div class="panel">' +
-        '<div class="panel-header">' +
-          'Hierarchy' +
-          '<span class="count">\u00b7 ' + SPONZA_HIERARCHY.length + '</span>' +
-          '<div class="spacer"></div>' +
-          '<button class="icon-btn" title="Add entity">' + ICO.plus + '</button>' +
+        '<div class="panel-tabs" id="left-tabs">' +
+          '<button class="panel-tab active" data-action="ltab" data-tab="scene">Scene</button>' +
+          '<button class="panel-tab" data-action="ltab" data-tab="browser">Browser</button>' +
         '</div>' +
-        '<div class="tree-filter">' +
-          '<input id="hier-filter" placeholder="filter\u2026" autocomplete="off">' +
+        '<div id="left-body" style="flex:1; display:flex; flex-direction:column; min-height:0">' +
+          '<div id="scene-view" style="display:flex; flex-direction:column; flex:1; min-height:0">' +
+            '<div class="tree-filter" style="display:flex; gap:8px; align-items:center">' +
+              '<input id="hier-filter" style="flex:1" placeholder="filter entities\u2026" autocomplete="off">' +
+              '<button title="Refresh Scene" style="padding:4px 8px; font-size:10px; cursor:pointer" onclick="document.title=\'mvr:refresh_scene\'">Refresh</button>' +
+            '</div>' +
+            '<div class="panel-body"><div class="tree no-select" id="hier-tree"></div></div>' +
+          '</div>' +
+          '<div id="browser-view" style="display:none; flex:1; min-height:0; overflow-y:auto">' +
+            '<div id="worlds-list"></div>' +
+          '</div>' +
         '</div>' +
-        '<div class="panel-body"><div class="tree no-select" id="hier-tree"></div></div>' +
       '</div>';
     container._built = true;
 
@@ -56,7 +62,30 @@ function renderHierarchy(container) {
       });
     }
   }
-  diffHierTree();
+
+  syncLeftTabs();
+}
+
+function syncLeftTabs() {
+  var tabs = document.querySelectorAll("[data-action='ltab']");
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.toggle('active', tabs[i].dataset.tab === state.leftTab);
+  }
+
+  var sceneView   = document.getElementById('scene-view');
+  var browserView = document.getElementById('browser-view');
+  if (!sceneView || !browserView) return;
+
+  if (state.leftTab === 'scene') {
+    sceneView.style.display = 'flex';
+    browserView.style.display = 'none';
+    document.title = 'mvr:refresh_scene';
+    diffHierTree();
+  } else {
+    sceneView.style.display = 'none';
+    browserView.style.display = 'block';
+    if (typeof window.renderWorlds === 'function') window.renderWorlds();
+  }
 }
 
 function diffHierTree() {

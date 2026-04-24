@@ -34,4 +34,41 @@ SceneLightData ProcessLocalWorldRuntimeHost::scene_light() const
     return m_renderer.scene_light();
 }
 
+void ProcessLocalWorldRuntimeHost::set_runtime_state(u32)
+{
+}
+
+u32 ProcessLocalWorldRuntimeHost::register_mesh(WorldId world_id, ByteString const& virtual_path)
+{
+    auto scoped_path = ByteString::formatted("{}:{}", world_id, virtual_path);
+    if (auto it = m_meshes.find(scoped_path); it != m_meshes.end())
+        return it->value;
+    u32 handle = (world_id << 24) | (m_meshes.size() + 1);
+    m_meshes.set(move(scoped_path), handle);
+    m_renderer.register_mesh(handle, virtual_path);
+    return handle;
+}
+
+u32 ProcessLocalWorldRuntimeHost::register_material(WorldId world_id, ByteString const& virtual_path)
+{
+    auto scoped_path = ByteString::formatted("{}:{}", world_id, virtual_path);
+    if (auto it = m_materials.find(scoped_path); it != m_materials.end())
+        return it->value;
+    u32 handle = (world_id << 24) | (m_materials.size() + 1);
+    m_materials.set(move(scoped_path), handle);
+    m_renderer.register_material(handle, virtual_path);
+    return handle;
+}
+
+u32 ProcessLocalWorldRuntimeHost::register_panel(WorldId world_id, u32 entity_id, ByteString const& url, float width, float height)
+{
+    u64 panel_key = (static_cast<u64>(world_id) << 32) | entity_id;
+    if (auto it = m_panels.find(panel_key); it != m_panels.end())
+        return it->value;
+    u32 handle = (world_id << 24) | (m_panels.size() + 1);
+    m_panels.set(panel_key, handle);
+    m_renderer.register_panel(handle, entity_id, url, width, height);
+    return handle;
+}
+
 }

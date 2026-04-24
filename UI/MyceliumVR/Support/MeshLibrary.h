@@ -38,6 +38,7 @@ public:
     explicit MeshLibrary(VirtualFileSystem const* = nullptr, MaterialLibrary* = nullptr);
 
     ErrorOr<MeshAsset const*> resolve_mesh(String const& mesh_name);
+    void unload_world_resources(u32 world_id);
     MaterialLibrary const* material_library() const { return m_material_library; }
 
 private:

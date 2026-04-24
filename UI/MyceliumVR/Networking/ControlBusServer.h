@@ -21,11 +21,16 @@
 namespace MyceliumVR {
 
 class WorldManagementSystem;
+class WorldRuntime;
 
 class ControlBusServer {
 public:
-    explicit ControlBusServer(WorldManagementSystem&);
+    explicit ControlBusServer(WorldManagementSystem*);
     ~ControlBusServer();
+
+    void set_runtime(WorldRuntime* runtime) { m_runtime = runtime; }
+    void set_world_ready(bool ready) { m_world_ready = ready; }
+    void set_shutdown_callback(Function<void()> callback) { m_shutdown_callback = move(callback); }
 
     ErrorOr<void> start(u32 world_id);
     void stop();
@@ -33,6 +38,7 @@ public:
 
     u16 port() const { return m_port; }
     String const& capability_token() const { return m_capability_token; }
+    bool is_running() const { return m_server != nullptr; }
 
 private:
     struct Client : public RefCounted<Client> {
@@ -56,16 +62,22 @@ private:
     ErrorOr<void> handle_contexts_restart(Client&, StringView id, JsonObject const&);
     ErrorOr<void> handle_filesystem_list_dir(Client&, StringView id, StringView path);
     ErrorOr<void> handle_filesystem_read_text(Client&, StringView id, StringView path);
+    ErrorOr<void> handle_script_eval(Client&, StringView id, StringView source);
     ErrorOr<void> handle_metrics_snapshot(Client&, StringView id);
+    ErrorOr<void> handle_resources_list(Client&, StringView id);
+    ErrorOr<void> handle_world_shutdown(Client&, StringView id);
     ErrorOr<void> handle_events_subscribe(Client&, StringView id, JsonObject const&);
     void send_response(Client&, StringView id, bool ok, JsonValue const& result = JsonValue(), JsonValue const& error = JsonValue());
 
-    WorldManagementSystem& m_world_manager;
+    WorldManagementSystem* m_world_manager { nullptr };
+    WorldRuntime* m_runtime { nullptr };
     u32 m_world_id { 0 };
     u16 m_port { 0 };
     String m_capability_token;
     RefPtr<Core::TCPServer> m_server;
     HashTable<NonnullRefPtr<Client>> m_clients;
+    Function<void()> m_shutdown_callback;
+    bool m_world_ready { false };
 };
 
 }

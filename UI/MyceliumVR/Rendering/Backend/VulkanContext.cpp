@@ -292,7 +292,7 @@ ErrorOr<void> VulkanContext::initialize(SDL_Window& window)
     if (m_supports_external_image_import)
         outln("VulkanContext: VK_KHR_external_memory_fd supported — zero-copy overlay path available.");
     else
-        outln("VulkanContext: VK_KHR_external_memory_fd not available — overlay will use CPU bitmap path.");
+        outln("VulkanContext: VK_KHR_external_memory_fd not available — zero-copy web surfaces are unavailable.");
     m_device = TRY(create_logical_device(m_physical_device, m_graphics_queue_family, m_supports_multi_draw_indirect, m_supports_external_image_import));
     vkGetDeviceQueue(m_device, m_graphics_queue_family, 0, &m_graphics_queue);
 

@@ -36,6 +36,7 @@ struct WorldManifest {
     String entry_script;
     u32 script_tick_budget_ms { 0 };
     u32 wasm_memory_limit_mb { 64 };
+    u32 background_tick_rate { 10 };
     Permissions permissions;
     Networking networking;
 };

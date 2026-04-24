@@ -53,6 +53,8 @@ public:
     // Destroy all cached GPU resources. Must be called before the Vulkan device is destroyed.
     void destroy();
 
+    void unload_world_resources(u32 world_id);
+
 private:
     ErrorOr<Entry> load_and_upload(VirtualFileSystem const&, StringView virtual_path);
     ErrorOr<Entry> decode_and_upload(ReadonlyBytes bytes);

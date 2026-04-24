@@ -5,7 +5,9 @@
 
 #pragma once
 
+#include <AK/ByteBuffer.h>
 #include <AK/Array.h>
+#include <AK/Error.h>
 #include <AK/StringView.h>
 #include <SDL3/SDL.h>
 #include <mutex>
@@ -53,5 +55,8 @@ private:
     float m_wheel_delta_x { 0.0f };
     float m_wheel_delta_y { 0.0f };
 };
+
+ErrorOr<ByteBuffer> serialize_input_frame_state(InputFrameState const&);
+ErrorOr<InputFrameState> deserialize_input_frame_state(ReadonlyBytes);
 
 }

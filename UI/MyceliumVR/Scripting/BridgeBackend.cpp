@@ -4,6 +4,7 @@
  */
 
 #include "BridgeBackend.h"
+#include "../Support/Profiling.h"
 
 namespace MyceliumVR {
 
@@ -130,8 +131,15 @@ Optional<Transform> BridgeBackend::transform_for_entity(EntityId entity) const
 
 void BridgeBackend::set_camera(double px, double py, double pz, double yaw_degrees, double pitch_degrees)
 {
+    ZoneScopedN("WorldProcess/Bridge/SetCamera");
     if (!m_runtime_host)
         return;
+
+    static bool s_logged_first_camera_update = false;
+    if (!s_logged_first_camera_update) {
+        s_logged_first_camera_update = true;
+        outln("MyceliumWorld: received first camera update from script");
+    }
 
     CameraState camera_state {};
     camera_state.position[0] = static_cast<float>(px);

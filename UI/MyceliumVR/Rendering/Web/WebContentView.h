@@ -6,8 +6,11 @@
 #pragma once
 
 #include <AK/Error.h>
+#include <AK/Function.h>
 #include <AK/HashMap.h>
 #include <AK/Optional.h>
+#include <AK/String.h>
+#include <AK/StringView.h>
 #include <AK/Vector.h>
 #include <LibGfx/ExternalVulkanImage.h>
 #include <LibIPC/File.h>
@@ -36,6 +39,12 @@ struct WebContentBitmapView {
     Gfx::Bitmap const* bitmap { nullptr };
 };
 
+struct WebContentVulkanImageView {
+    VkImage image { VK_NULL_HANDLE };
+    u32 width { 0 };
+    u32 height { 0 };
+};
+
 class WebContentView final : public WebView::ViewImplementation {
 public:
     WebContentView(int width, int height, bool supports_vulkan_external_images = false, VkDevice vulkan_device = VK_NULL_HANDLE);
@@ -57,6 +66,16 @@ public:
     VkImage current_vulkan_image() const;
     u32 vulkan_image_width() const;
     u32 vulkan_image_height() const;
+    Optional<WebContentVulkanImageView> snapshot_vulkan_image_view();
+    void configure_deferred_ready_to_paint_acks(bool enabled);
+    void acknowledge_ready_to_paint_with_trace(StringView presenter);
+    void set_debug_name(String name) { m_debug_name = move(name); }
+    StringView debug_name() const { return m_debug_name.is_empty() ? "unnamed-webview"sv : m_debug_name.bytes_as_string_view(); }
+    i32 current_front_bitmap_id() const { return m_client_state.front_bitmap.id; }
+    i32 current_back_bitmap_id() const { return m_client_state.back_bitmap.id; }
+    u32 pending_ready_to_paint_ack_count() const { return m_pending_ready_to_paint_acks; }
+    Function<void()> on_vulkan_image_ready;
+    Function<void()> on_vulkan_images_invalidated;
 
 private:
     // ^WebView::ViewImplementation - required pure virtuals
@@ -76,6 +95,7 @@ private:
     VkDevice m_vulkan_device { VK_NULL_HANDLE };
     u32 m_frames_waiting_for_first_paint { 0 };
     Web::UIEvents::MouseButton m_pressed_mouse_buttons { Web::UIEvents::MouseButton::None };
+    String m_debug_name;
 
 #if defined(USE_VULKAN)
     struct VulkanImageSlot {

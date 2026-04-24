@@ -21,6 +21,7 @@ class Application : public WebView::Application {
 public:
     bool vr_mode_requested() const { return m_vr_argument; }
     bool vulkan_probe_requested() const { return m_vulkan_probe_argument; }
+    bool subprocess_mode_requested() const { return m_subprocess_argument; }
     bool has_script_path_override() const { return !m_script_path_argument.is_empty(); }
     StringView script_path() const
     {
@@ -50,6 +51,7 @@ private:
     {
         args_parser.add_option(m_vr_argument, "Start in VR mode (requires OpenXR)", "vr", 0);
         args_parser.add_option(m_vulkan_probe_argument, "Probe SDL3 Vulkan instance and surface support, then exit", "vulkan-probe", 0);
+        args_parser.add_option(m_subprocess_argument, "Run worlds in subprocesses", "subprocess", 0);
         args_parser.add_option(m_script_path_argument, "JavaScript runtime script to load", "script", 0, "path");
         args_parser.add_option(m_world_path_argument, "Loose folder world to mount by package name, e.g. world://example/", "world", 0, "path");
         args_parser.add_option(m_shadow_quality_argument, "Shadow quality level from 0 to 9 (0 = off, 1 = 1x1, 2 = 3x3, 3 = 5x5, ...)", "shadow-quality", 0, "level");
@@ -102,6 +104,7 @@ private:
 
     bool m_vr_argument { false };
     bool m_vulkan_probe_argument { false };
+    bool m_subprocess_argument { false };
     StringView m_script_path_argument;
     StringView m_world_path_argument;
     StringView m_shadow_quality_argument;

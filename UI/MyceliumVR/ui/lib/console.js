@@ -26,8 +26,9 @@ function renderConsole(container) {
     if (inp) {
       inp.addEventListener('keydown', function (ev) {
         if (ev.key !== 'Enter' || !ev.target.value.trim()) return;
-        pushLog('> ' + ev.target.value, 'JS',  'REPL',   'js');
-        pushLog('\u2192 undefined',      'OK',  'Bridge', 'ok');
+        var cmd = ev.target.value;
+        pushLog('> ' + cmd, 'JS', 'REPL', 'js');
+        document.title = 'mvr:eval:' + cmd;
         ev.target.value = '';
       });
     }

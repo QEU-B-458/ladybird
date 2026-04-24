@@ -979,3 +979,56 @@ html, body {
 .rg-bar.warm { background: #e6a817; }
 .rg-bar.hot  { background: #e05a5a; }
 .rg-ms { color: var(--fg-1); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ─── Worlds list ────────────────────────────────────────────────────────── */
+
+.world-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px var(--pad-lg);
+  border-bottom: 1px solid var(--line-1);
+}
+.world-item:hover { background: var(--bg-2); }
+.world-item.active { background: var(--accent-glow); }
+.world-item.active .world-name { color: var(--accent); }
+
+.world-info { flex: 1; min-width: 0; }
+.world-name { font-family: var(--f-mono); font-size: 13px; color: var(--fg-1); font-weight: 500; margin-bottom: 2px; }
+.world-path { font-family: var(--f-mono); font-size: 10px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.world-actions { display: flex; gap: 6px; }
+.world-actions button {
+  all: unset;
+  padding: 4px 10px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--fg-2);
+  background: var(--bg-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.world-actions button:hover { background: var(--bg-4); color: var(--fg-1); }
+.world-actions button.secondary { color: var(--fg-3); background: transparent; border: 1px solid var(--line-1); }
+.world-actions button.secondary:hover { border-color: var(--line-2); color: var(--fg-2); }
+
+.badge {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--fg-3);
+  text-transform: uppercase;
+}
+.badge.active { background: var(--accent); color: var(--bg-0); font-weight: 600; }
+.badge.running { background: var(--accent-glow); color: var(--accent); border: 1px solid var(--accent-line); }
+
+.empty-state, .loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--fg-4);
+  font-style: italic;
+}

@@ -37,6 +37,7 @@ class ScriptHost;
 class ScriptRuntime;
 class VirtualFileSystem;
 class WasmRuntime;
+class WorldManagementSystem;
 
 using WorldId = u32;
 
@@ -78,7 +79,7 @@ private:
     ScriptComponent m_component;
 };
 
-class WorldRuntime {
+class WorldRuntime : public RefCounted<WorldRuntime> {
 public:
     struct BootInfo {
         ByteString source_path;
@@ -88,7 +89,7 @@ public:
         String entry_script_path;
     };
 
-    explicit WorldRuntime(WorldManagementSystem&, WorldId, String name);
+    explicit WorldRuntime(WorldManagementSystem*, WorldId, String name);
     ~WorldRuntime();
 
     WorldId id() const { return m_id; }
@@ -102,21 +103,30 @@ public:
     Optional<BootstrapInfo> const& bootstrap_info() const { return m_bootstrap_info; }
     void set_script_tick_budget_ms(u32 value) { m_script_tick_budget_ms = value; }
     u32 script_tick_budget_ms() const { return m_script_tick_budget_ms; }
+    void set_background_tick_rate(u32 value) { m_background_tick_rate = value; }
+    u32 background_tick_rate() const { return m_background_tick_rate; }
 
     bool is_initialized() const { return m_script_runtime; }
     WorldLifecyclePhase phase() const { return m_phase.load(); }
     WorldRuntimeState state() const { return m_state.load(); }
-    void set_state(WorldRuntimeState state) { m_state.store(state); }
+    void set_state(WorldRuntimeState state);
     WorldState world_state() const { return m_world_state.load(); }
     bool is_faulted() const { return m_world_state.load() == WorldState::Faulted; }
     String const& fault_reason() const { return m_fault_reason; }
 
-    ErrorOr<void> initialize(ScriptHost&, VirtualFileSystem*, InputState*, WorldRuntimeHost* = nullptr);
+    ErrorOr<void> initialize(ScriptHost&, VirtualFileSystem*, InputState*, WorldRuntimeHost* = nullptr, bool use_worker_thread = true);
+    bool sync_scene_revision_for_static_publish();
+    size_t required_static_scene_snapshot_bytes();
+    bool build_static_scene_snapshot(Span<u8> slot);
+    void build_render_snapshot(Span<u8> slot);
     ErrorOr<void> load_script(ByteString const&);
     ErrorOr<void> load_script_source(ByteBuffer, StringView filename);
     ErrorOr<void> load_control_script(ByteString const&);
+    ErrorOr<String, String> run_script(StringView source, StringView filename = "eval"sv);
     void set_log_callback(Function<void(StringView, StringView, StringView)>);
+    void set_fault_callback(Function<void(StringView)> callback) { m_fault_callback = move(callback); }
     void update(double delta_time, InputFrameState);
+    void tick(double delta_time, InputFrameState);
     void shutdown();
     void enqueue_network_events(Vector<NetworkEvent>);
     Optional<NetworkEvent> dequeue_network_event();
@@ -148,6 +158,8 @@ public:
     BridgeBackend& bridge_backend();
     BridgeBackend const& bridge_backend() const;
 
+    WorldRuntimeHost* runtime_host() { return m_runtime_host; }
+
     ControlBusServer& control_bus() { return *m_control_bus; }
     ControlBusServer const& control_bus() const { return *m_control_bus; }
 
@@ -163,8 +175,9 @@ private:
     std::atomic<WorldRuntimeState> m_state { WorldRuntimeState::Stopped };
     std::atomic<WorldState> m_world_state { WorldState::Running };
     String m_fault_reason;
-    WorldManagementSystem& m_world_manager;
+    WorldManagementSystem* m_world_manager { nullptr };
     ScriptHost* m_script_host { nullptr };
+    WorldRuntimeHost* m_runtime_host { nullptr };
     OwnPtr<World> m_world;
     OwnPtr<ScriptRuntime> m_script_runtime;
     OwnPtr<WasmRuntime> m_networking_wasm;
@@ -176,6 +189,7 @@ private:
     Optional<BootInfo> m_boot_info;
     Optional<BootstrapInfo> m_bootstrap_info;
     u32 m_script_tick_budget_ms { 0 };
+    u32 m_background_tick_rate { 10 };
     std::mutex m_world_mutex;
     std::mutex m_worker_mutex;
     std::condition_variable m_worker_condition;
@@ -185,6 +199,11 @@ private:
     double m_pending_delta_time { 0.0 };
     InputFrameState m_pending_input_state;
     bool m_worker_started { false };
+    bool m_logged_snapshot_camera_motion { false };
+    CameraState m_last_snapshot_camera_state;
+    u32 m_scene_revision { 1 };
+    bool m_static_scene_publish_pending { true };
+    Function<void(StringView)> m_fault_callback;
 };
 
 }

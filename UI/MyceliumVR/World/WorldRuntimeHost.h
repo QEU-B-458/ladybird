@@ -5,9 +5,12 @@
 
 #pragma once
 
+#include <AK/ByteString.h>
 #include <AK/Types.h>
 
 namespace MyceliumVR {
+
+using WorldId = u32;
 
 static constexpr int MaxPointLights = 64;
 
@@ -49,6 +52,11 @@ public:
     virtual CameraState camera_state() const = 0;
     virtual void set_scene_light(SceneLightData const&) = 0;
     virtual SceneLightData scene_light() const = 0;
+    virtual void set_runtime_state(u32 state) = 0;
+
+    virtual u32 register_mesh(WorldId world_id, ByteString const& virtual_path) = 0;
+    virtual u32 register_material(WorldId world_id, ByteString const& virtual_path) = 0;
+    virtual u32 register_panel(WorldId world_id, u32 entity_id, ByteString const& url, float width, float height) = 0;
 };
 
 }

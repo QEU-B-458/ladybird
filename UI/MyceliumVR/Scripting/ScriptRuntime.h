@@ -30,7 +30,7 @@ class WorldRuntime;
 
 class ScriptRuntime {
 public:
-    explicit ScriptRuntime(ScriptHost&, World&, NetworkService&, VirtualFileSystem* = nullptr, InputState* = nullptr,
+    explicit ScriptRuntime(ScriptHost&, World&, NetworkService*, VirtualFileSystem* = nullptr, InputState* = nullptr,
         WorldRuntimeHost* = nullptr, WorldRuntime* = nullptr);
     ~ScriptRuntime();
 
@@ -38,10 +38,11 @@ public:
     ErrorOr<void> load_script(ByteString const& path);
     ErrorOr<void> load_control_script(ByteString const& path);
     ErrorOr<void> load_script_source(ByteBuffer source, StringView filename);
+    ErrorOr<String, String> run_script(StringView source, StringView filename = "eval"sv);
     bool update(double delta_time);
 
     World& world() { return m_world; }
-    NetworkService& network_service() { return m_network_service; }
+    NetworkService* network_service() { return m_network_service; }
     BridgeBackend& bridge_backend() { return m_bridge_backend; }
     BridgeBackend const& bridge_backend() const { return m_bridge_backend; }
     VirtualFileSystem* virtual_file_system() { return m_virtual_file_system; }
@@ -77,7 +78,7 @@ private:
 
     ScriptHost& m_script_host;
     World& m_world;
-    NetworkService& m_network_service;
+    NetworkService* m_network_service { nullptr };
     BridgeBackend m_bridge_backend;
     VirtualFileSystem* m_virtual_file_system { nullptr };
     InputState* m_input_state_source { nullptr };

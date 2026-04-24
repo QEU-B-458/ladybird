@@ -8,6 +8,8 @@ let camera = {
 
 let selectedIndex = 0;
 let selectedEntity = null;
+let loggedInputSeen = false;
+let loggedCameraMotion = false;
 
 function refreshSelectedEntity() {
     const count = mycelium.entityCount();
@@ -48,6 +50,20 @@ function controlStart() {
 }
 
 function controlUpdate(deltaTime) {
+    const hadInput =
+        mycelium.input.mouseDeltaX() !== 0 ||
+        mycelium.input.mouseDeltaY() !== 0 ||
+        mycelium.input.isKeyDown("W") ||
+        mycelium.input.isKeyDown("A") ||
+        mycelium.input.isKeyDown("S") ||
+        mycelium.input.isKeyDown("D") ||
+        mycelium.input.isKeyDown("Q") ||
+        mycelium.input.isKeyDown("E");
+    if (hadInput && !loggedInputSeen) {
+        loggedInputSeen = true;
+        mycelium.log("controls: first movement input reached controlUpdate");
+    }
+
     const moveSpeed = mycelium.input.isKeyDown("LShift") ? 6.0 : 3.0;
     const editSpeed = 2.0 * deltaTime;
     const yawStep = 90.0 * deltaTime;
@@ -61,6 +77,8 @@ function controlUpdate(deltaTime) {
             mycelium.log(`selected entity: ${selectedEntity}`);
         }
     }
+
+    const before = { px: camera.px, py: camera.py, pz: camera.pz, yaw: camera.yaw, pitch: camera.pitch };
 
     camera.yaw += mycelium.input.mouseDeltaX() * 0.12;
     camera.pitch -= mycelium.input.mouseDeltaY() * 0.12;
@@ -106,6 +124,17 @@ function controlUpdate(deltaTime) {
         camera.py -= frameMove;
     if (mycelium.input.isKeyDown("E"))
         camera.py += frameMove;
+
+    const moved =
+        camera.px !== before.px ||
+        camera.py !== before.py ||
+        camera.pz !== before.pz ||
+        camera.yaw !== before.yaw ||
+        camera.pitch !== before.pitch;
+    if (moved && !loggedCameraMotion) {
+        loggedCameraMotion = true;
+        mycelium.log(`controls: first camera motion -> pos=(${camera.px.toFixed(2)}, ${camera.py.toFixed(2)}, ${camera.pz.toFixed(2)}) yaw=${camera.yaw.toFixed(2)} pitch=${camera.pitch.toFixed(2)}`);
+    }
 
     mycelium.setCamera(camera.px, camera.py, camera.pz, camera.yaw, camera.pitch);
 

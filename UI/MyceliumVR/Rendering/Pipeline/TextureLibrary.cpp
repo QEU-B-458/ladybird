@@ -222,32 +222,38 @@ ErrorOr<TextureLibrary::Entry> TextureLibrary::decode_and_upload(ReadonlyBytes b
 
 void TextureLibrary::destroy()
 {
-#if defined(TRACY_ENABLE)
-    ZoneScopedN("Asset/TextureDestroyAll");
-    TracyPlot("TextureLibrary/CacheEntries", static_cast<int64_t>(m_cache.size()));
-#endif
-    for (auto& [key, entry] : m_cache) {
-        if (entry->sampler != VK_NULL_HANDLE)
-            vkDestroySampler(m_device, entry->sampler, nullptr);
-        if (entry->image_view != VK_NULL_HANDLE)
-            vkDestroyImageView(m_device, entry->image_view, nullptr);
-        if (entry->image != VK_NULL_HANDLE)
-            vmaDestroyImage(m_allocator, entry->image, entry->allocation);
-        
-        entry->sampler = VK_NULL_HANDLE;
-        entry->image_view = VK_NULL_HANDLE;
-        entry->image = VK_NULL_HANDLE;
-        entry->allocation = VK_NULL_HANDLE;
-    }
-    m_cache.clear();
-#if defined(TRACY_ENABLE)
-    TracyPlot("TextureLibrary/CacheEntries", static_cast<int64_t>(0));
-#endif
+    unload_world_resources(0);
 
     if (m_transient_pool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_device, m_transient_pool, nullptr);
         m_transient_pool = VK_NULL_HANDLE;
     }
+}
+
+void TextureLibrary::unload_world_resources(u32)
+{
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Asset/TextureUnloadWorld");
+    TracyPlot("TextureLibrary/CacheEntries", static_cast<int64_t>(m_cache.size()));
+#endif
+    for (auto& it : m_cache) {
+        auto& entry = *it.value;
+        if (entry.sampler != VK_NULL_HANDLE)
+            vkDestroySampler(m_device, entry.sampler, nullptr);
+        if (entry.image_view != VK_NULL_HANDLE)
+            vkDestroyImageView(m_device, entry.image_view, nullptr);
+        if (entry.image != VK_NULL_HANDLE)
+            vmaDestroyImage(m_allocator, entry.image, entry.allocation);
+        
+        entry.sampler = VK_NULL_HANDLE;
+        entry.image_view = VK_NULL_HANDLE;
+        entry.image = VK_NULL_HANDLE;
+        entry.allocation = VK_NULL_HANDLE;
+    }
+    m_cache.clear();
+#if defined(TRACY_ENABLE)
+    TracyPlot("TextureLibrary/CacheEntries", static_cast<int64_t>(0));
+#endif
 }
 
 #endif // USE_VULKAN

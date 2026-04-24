@@ -41,7 +41,10 @@ public:
     virtual String name() const override { return MUST(String::from_utf8("Geometry"sv)); }
     virtual void destroy(VkDevice device, VmaAllocator allocator) override;
 
-    void set_world(World const* world) { m_world = world; }
+    void set_world(World const* world) { m_world = world; m_snapshot = {}; m_static_scene = {}; }
+    void set_snapshot(ReadonlySpan<u8> snapshot) { m_snapshot = snapshot; m_world = nullptr; }
+    void set_static_scene(ReadonlySpan<u8> static_scene) { m_static_scene = static_scene; }
+    void force_rebuild() { m_last_processed_scene_revision = 0; }
     void set_scene_light(SceneLightData const& light) { m_scene_light = light; }
     void set_camera_position(float const pos[3]) { memcpy(m_camera_position, pos, sizeof(float) * 3); }
     void set_shadow_view_projection(Mat4 const& shadow_view_projection) { m_shadow_view_projection = shadow_view_projection; }
@@ -54,6 +57,12 @@ public:
     {
         m_flat_normal_texture = normal;
         m_fallback_black_texture = black;
+    }
+
+    void set_handle_mappings(HashMap<u32, ByteString> const* meshes, HashMap<u32, ByteString> const* materials)
+    {
+        m_mesh_handles = meshes;
+        m_material_handles = materials;
     }
 
     VulkanBuffer const& indirect_buffer() const { return m_indirect_buffer; }
@@ -92,6 +101,10 @@ private:
     VirtualFileSystem const* m_file_system { nullptr };
 
     World const* m_world { nullptr };
+    ReadonlySpan<u8> m_snapshot;
+    ReadonlySpan<u8> m_static_scene;
+    HashMap<u32, ByteString> const* m_mesh_handles { nullptr };
+    HashMap<u32, ByteString> const* m_material_handles { nullptr };
     SceneLightData m_scene_light;
     float m_camera_position[3] { 0.0f, 0.0f, 0.0f };
 
@@ -125,6 +138,8 @@ private:
     VkDescriptorPool m_material_ssbo_descriptor_pool { VK_NULL_HANDLE };
     VkDescriptorSet m_material_ssbo_descriptor_set { VK_NULL_HANDLE };
     GraphBindings m_graph_bindings;
+
+    u32 m_last_processed_scene_revision { 0 };
 
     void update_light_ubo(VulkanContext const& ctx);
     void update_material_ssbo(VulkanContext const& ctx);

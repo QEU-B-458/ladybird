@@ -16,7 +16,7 @@
 
 namespace MyceliumVR {
 
-static constexpr bool debug_web_content_paint = false;
+static constexpr bool debug_web_content_paint = true;
 
 static Web::UIEvents::MouseButton sdl_button_to_web_button(u8 button)
 {
@@ -101,9 +101,18 @@ WebContentView::WebContentView(int width, int height, bool supports_vulkan_exter
 {
     on_ready_to_paint = [this]() {
         if constexpr (debug_web_content_paint)
-            dbgln("WebContentView: on_ready_to_paint fired!");
+            dbgln("WebContentView[{}]: did_paint front_id={} back_id={} pending_acks={} auto_ack={} has_usable_bitmap={} has_vulkan_image={}",
+                debug_name(),
+                m_client_state.front_bitmap.id,
+                m_client_state.back_bitmap.id,
+                m_pending_ready_to_paint_acks,
+                m_automatic_ready_to_paint_acks_enabled,
+                m_client_state.has_usable_bitmap,
+                has_vulkan_image());
         m_needs_paint = true;
         m_frames_waiting_for_first_paint = 0;
+        if (on_vulkan_image_ready)
+            on_vulkan_image_ready();
     };
     on_load_start = [](URL::URL const& url, bool is_redirect) {
         if constexpr (debug_web_content_paint)
@@ -124,9 +133,17 @@ WebContentView::WebContentView(int width, int height, bool supports_vulkan_exter
     if constexpr (debug_web_content_paint)
         dbgln("WebContentView: calling initialize_client...");
     initialize_client(CreateNewClient::Yes);
+
+    // initialize_client() sends the initial viewport immediately. Re-send it after
+    // toggling the external-image preference so WebContent allocates the correct
+    // backing-store type for the very first paint.
     client().async_set_use_vulkan_external_images(m_supports_vulkan_external_images);
+    handle_resize();
+    client().async_set_window_size(m_client_state.page_index, viewport_size());
+    client().async_did_update_window_rect(m_client_state.page_index);
     if constexpr (debug_web_content_paint) {
-        dbgln("WebContentView: initialize_client done, client connected: {}, page id: {}, front bitmap id: {}, back bitmap id: {}",
+        dbgln("WebContentView[{}]: initialize_client done, client connected: {}, page id: {}, front bitmap id: {}, back bitmap id: {}",
+            debug_name(),
             m_client_state.client != nullptr,
             page_id(),
             m_client_state.front_bitmap.id,
@@ -170,6 +187,9 @@ void WebContentView::did_allocate_vulkan_backing_stores(
         warnln("WebContentView: received did_allocate_vulkan_backing_stores but no VkDevice — ignoring");
         return;
     }
+
+    if (on_vulkan_images_invalidated)
+        on_vulkan_images_invalidated();
 
     destroy_vulkan_images();
 
@@ -248,6 +268,58 @@ u32 WebContentView::vulkan_image_height() const
     return 0;
 }
 
+Optional<WebContentVulkanImageView> WebContentView::snapshot_vulkan_image_view()
+{
+#if defined(USE_VULKAN)
+    if (!m_needs_paint || !m_client_state.has_usable_bitmap)
+        return {};
+
+    auto it = m_vulkan_images.find(m_client_state.front_bitmap.id);
+    if (it == m_vulkan_images.end())
+        return {};
+
+    dbgln("WebContentView[{}]: presenting pending Vulkan image front_id={} image={} size={}x{} pending_acks={}",
+        debug_name(),
+        m_client_state.front_bitmap.id,
+        (void*)it->value.imported.image,
+        it->value.width,
+        it->value.height,
+        m_pending_ready_to_paint_acks);
+
+    m_needs_paint = false;
+    return WebContentVulkanImageView {
+        .image = it->value.imported.image,
+        .width = it->value.width,
+        .height = it->value.height,
+    };
+#else
+    return {};
+#endif
+}
+
+void WebContentView::configure_deferred_ready_to_paint_acks(bool enabled)
+{
+    set_automatic_ready_to_paint_acks_enabled(!enabled);
+    dbgln("WebContentView[{}]: deferred ready_to_paint acks {}",
+        debug_name(),
+        enabled ? "enabled" : "disabled");
+}
+
+void WebContentView::acknowledge_ready_to_paint_with_trace(StringView presenter)
+{
+    dbgln("WebContentView[{}]: acknowledge_ready_to_paint by {} front_id={} back_id={} pending_acks_before={}",
+        debug_name(),
+        presenter,
+        m_client_state.front_bitmap.id,
+        m_client_state.back_bitmap.id,
+        m_pending_ready_to_paint_acks);
+    acknowledge_ready_to_paint();
+    dbgln("WebContentView[{}]: acknowledge_ready_to_paint by {} pending_acks_after={}",
+        debug_name(),
+        presenter,
+        m_pending_ready_to_paint_acks);
+}
+
 bool WebContentView::needs_paint() const
 {
 #if defined(TRACY_ENABLE)
@@ -300,20 +372,22 @@ ErrorOr<Optional<WebContentBitmapView>> WebContentView::snapshot_bitmap_view_for
 #if defined(TRACY_ENABLE)
     ZoneScopedN("Boundary/Ladybird/SnapshotBitmapViewport");
 #endif
-    if (!m_client_state.has_usable_bitmap || !m_needs_paint)
+    if (!m_client_state.has_usable_bitmap)
         return Optional<WebContentBitmapView> {};
 
     VERIFY(m_client_state.front_bitmap.shared_image_buffer);
 
     auto expected_size = viewport_size();
     auto bitmap_size = m_client_state.front_bitmap.last_painted_size;
-    if (bitmap_size.width() != expected_size.width() || bitmap_size.height() != expected_size.height())
-        return Optional<WebContentBitmapView> {};
+    if (bitmap_size.width() != expected_size.width() || bitmap_size.height() != expected_size.height()) {
+        if (m_needs_paint) return Optional<WebContentBitmapView> {}; // Still waiting for resize paint
+    }
 
     auto const* bitmap = m_client_state.front_bitmap.shared_image_buffer->bitmap().ptr();
     auto buffer_size = bitmap->size();
-    if (buffer_size.width() != expected_size.width() || buffer_size.height() != expected_size.height())
-        return Optional<WebContentBitmapView> {};
+    if (buffer_size.width() != expected_size.width() || buffer_size.height() != expected_size.height()) {
+         if (m_needs_paint) return Optional<WebContentBitmapView> {};
+    }
 
     auto snapshot = WebContentBitmapView {
         .width = buffer_size.width(),
@@ -418,7 +492,9 @@ void WebContentView::resize(int width, int height)
     m_width = width;
     m_height = height;
     m_needs_paint = true;
+    client().async_set_window_size(m_client_state.page_index, viewport_size());
     handle_resize();
+    client().async_did_update_window_rect(m_client_state.page_index);
 }
 
 void WebContentView::handle_sdl_event(SDL_Event const& event)

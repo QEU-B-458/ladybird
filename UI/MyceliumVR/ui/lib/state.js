@@ -26,6 +26,7 @@ var state = {
   expandedIds:   new Set(SPONZA_HIERARCHY.filter(function (e) { return e.expanded; }).map(function (e) { return e.id; })),
   openSections:  new Set(['transform', 'meshrenderer', 'material']),
   consoleTab:       'console',
+  leftTab:          'scene',
   renderTimings:    [],
   selectedComponents: null,
   bridgeFunctions:  [],

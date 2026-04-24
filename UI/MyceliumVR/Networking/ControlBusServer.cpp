@@ -7,6 +7,7 @@
 #include "../Scripting/BridgeBackend.h"
 #include "../Support/VirtualFileSystem.h"
 #include "../World/WorldManagementSystem.h"
+#include "../World/SubprocessWorldRuntimeHost.h"
 
 #include <AK/Base64.h>
 #include <AK/JsonArray.h>
@@ -143,9 +144,23 @@ static StringView runtime_state_name(WorldRuntimeState state)
     VERIFY_NOT_REACHED();
 }
 
+static WorldRuntime* find_runtime(WorldManagementSystem* manager, WorldRuntime* local_runtime, u32 world_id)
+{
+    if (local_runtime)
+        return local_runtime;
+#ifndef MYCELIUM_WORLD_PROCESS
+    if (manager)
+        return manager->find_runtime(world_id);
+#else
+    (void)manager;
+    (void)world_id;
+#endif
+    return nullptr;
 }
 
-ControlBusServer::ControlBusServer(WorldManagementSystem& manager)
+}
+
+ControlBusServer::ControlBusServer(WorldManagementSystem* manager)
     : m_world_manager(manager)
 {
 }
@@ -182,17 +197,19 @@ void ControlBusServer::stop()
 
 void ControlBusServer::on_ready_to_accept()
 {
-    auto socket_or_error = m_server->accept();
-    if (socket_or_error.is_error())
-        return;
+    while (true) {
+        auto socket_or_error = m_server->accept();
+        if (socket_or_error.is_error())
+            break;
 
-    auto buffered_socket_or_error = Core::BufferedTCPSocket::create(socket_or_error.release_value());
-    if (buffered_socket_or_error.is_error())
-        return;
+        auto buffered_socket_or_error = Core::BufferedTCPSocket::create(socket_or_error.release_value());
+        if (buffered_socket_or_error.is_error())
+            continue;
 
-    auto client = adopt_ref(*new Client(buffered_socket_or_error.release_value()));
-    client->socket->on_ready_to_read = [this, client] { on_client_data(client); };
-    m_clients.set(client);
+        auto client = adopt_ref(*new Client(buffered_socket_or_error.release_value()));
+        client->socket->on_ready_to_read = [this, client] { on_client_data(client); };
+        m_clients.set(client);
+    }
 }
 
 void ControlBusServer::on_client_data(Client& client)
@@ -237,8 +254,11 @@ ErrorOr<void> ControlBusServer::handle_handshake(Client& client, StringView requ
         return Error::from_string_literal("Malformed Sec-WebSocket-Key");
     auto key = key_line.substring_view(0, *key_end);
 
-    if (!request.contains(m_capability_token))
+    // Simple token check in the URL or headers
+    if (!request.contains(m_capability_token)) {
+        warnln("ControlBus: Handshake failed: token mismatch");
         return Error::from_string_literal("Invalid capability token");
+    }
 
     StringBuilder accept_base;
     accept_base.append(key);
@@ -300,8 +320,17 @@ ErrorOr<void> ControlBusServer::handle_message(Client& client, StringView messag
         auto path = params.has_value() ? params->get_string("path"sv).value_or(""_string) : ""_string;
         return handle_filesystem_read_text(client, id, path);
     }
+    if (method == "script.eval"sv) {
+        auto params = object.get_object("params"sv);
+        auto source = params.has_value() ? params->get_string("source"sv).value_or(""_string) : ""_string;
+        return handle_script_eval(client, id, source);
+    }
     if (method == "metrics.snapshot"sv)
         return handle_metrics_snapshot(client, id);
+    if (method == "resources.list"sv)
+        return handle_resources_list(client, id);
+    if (method == "world.shutdown"sv)
+        return handle_world_shutdown(client, id);
     if (method == "events.subscribe"sv)
         return handle_events_subscribe(client, id, object);
 
@@ -314,7 +343,7 @@ ErrorOr<void> ControlBusServer::handle_message(Client& client, StringView messag
 
 ErrorOr<void> ControlBusServer::handle_system_info(Client& client, StringView id)
 {
-    auto* runtime = m_world_manager.find_runtime(m_world_id);
+    auto* runtime = find_runtime(m_world_manager, m_runtime, m_world_id);
     if (!runtime) {
         JsonObject error;
         error.set("code"sv, "world_not_found"sv);
@@ -326,6 +355,7 @@ ErrorOr<void> ControlBusServer::handle_system_info(Client& client, StringView id
     JsonObject result;
     result.set("world_id"sv, runtime->id());
     result.set("name"sv, runtime->name());
+    result.set("ready"sv, m_world_ready);
     result.set("world_state"sv, world_state_name(runtime->world_state()));
     result.set("runtime_state"sv, runtime_state_name(runtime->state()));
     result.set("fault_reason"sv, runtime->fault_reason());
@@ -335,7 +365,7 @@ ErrorOr<void> ControlBusServer::handle_system_info(Client& client, StringView id
 
 ErrorOr<void> ControlBusServer::handle_entities_list(Client& client, StringView id)
 {
-    auto* runtime = m_world_manager.find_runtime(m_world_id);
+    auto* runtime = find_runtime(m_world_manager, m_runtime, m_world_id);
     if (!runtime)
         return Error::from_string_literal("World runtime is not available");
 
@@ -364,7 +394,7 @@ ErrorOr<void> ControlBusServer::handle_entities_list(Client& client, StringView 
 
 ErrorOr<void> ControlBusServer::handle_entities_inspect(Client& client, StringView id, u32 entity_id)
 {
-    auto* runtime = m_world_manager.find_runtime(m_world_id);
+    auto* runtime = find_runtime(m_world_manager, m_runtime, m_world_id);
     if (!runtime)
         return Error::from_string_literal("World runtime is not available");
 
@@ -423,7 +453,7 @@ ErrorOr<void> ControlBusServer::handle_entities_inspect(Client& client, StringVi
 
 ErrorOr<void> ControlBusServer::handle_entities_select(Client& client, StringView id, u32 entity_id)
 {
-    auto* runtime = m_world_manager.find_runtime(m_world_id);
+    auto* runtime = find_runtime(m_world_manager, m_runtime, m_world_id);
     if (!runtime)
         return Error::from_string_literal("World runtime is not available");
 
@@ -442,7 +472,7 @@ ErrorOr<void> ControlBusServer::handle_entities_select(Client& client, StringVie
 
 ErrorOr<void> ControlBusServer::handle_contexts_list(Client& client, StringView id)
 {
-    auto* runtime = m_world_manager.find_runtime(m_world_id);
+    auto* runtime = find_runtime(m_world_manager, m_runtime, m_world_id);
     if (!runtime)
         return Error::from_string_literal("World runtime is not available");
 
@@ -475,7 +505,15 @@ ErrorOr<void> ControlBusServer::handle_contexts_restart(Client& client, StringVi
 
 ErrorOr<void> ControlBusServer::handle_filesystem_list_dir(Client& client, StringView id, StringView path)
 {
-    auto* virtual_file_system = m_world_manager.virtual_file_system();
+    VirtualFileSystem* virtual_file_system = nullptr;
+    if (m_runtime) {
+        // TODO: We need a way to get VFS from WorldRuntime if it's not passed to ControlBusServer.
+    }
+#ifndef MYCELIUM_WORLD_PROCESS
+    if (m_world_manager)
+        virtual_file_system = m_world_manager->virtual_file_system();
+#endif
+    
     if (!virtual_file_system)
         return Error::from_string_literal("Virtual filesystem is not available");
 
@@ -508,7 +546,12 @@ ErrorOr<void> ControlBusServer::handle_filesystem_list_dir(Client& client, Strin
 
 ErrorOr<void> ControlBusServer::handle_filesystem_read_text(Client& client, StringView id, StringView path)
 {
-    auto* virtual_file_system = m_world_manager.virtual_file_system();
+    VirtualFileSystem* virtual_file_system = nullptr;
+#ifndef MYCELIUM_WORLD_PROCESS
+    if (m_world_manager)
+        virtual_file_system = m_world_manager->virtual_file_system();
+#endif
+
     if (!virtual_file_system)
         return Error::from_string_literal("Virtual filesystem is not available");
 
@@ -522,9 +565,35 @@ ErrorOr<void> ControlBusServer::handle_filesystem_read_text(Client& client, Stri
     return {};
 }
 
+ErrorOr<void> ControlBusServer::handle_script_eval(Client& client, StringView id, StringView source)
+{
+    auto* runtime = find_runtime(m_world_manager, m_runtime, m_world_id);
+    if (!runtime) {
+        JsonObject error;
+        error.set("code"sv, "world_not_found"sv);
+        error.set("message"sv, "World runtime is not available"sv);
+        send_response(client, id, false, {}, error);
+        return {};
+    }
+
+    auto result_or_error = runtime->run_script(source);
+    if (result_or_error.is_error()) {
+        JsonObject error;
+        error.set("code"sv, "eval_error"sv);
+        error.set("message"sv, result_or_error.error());
+        send_response(client, id, false, {}, error);
+        return {};
+    }
+
+    JsonObject result;
+    result.set("value"sv, result_or_error.value());
+    send_response(client, id, true, result);
+    return {};
+}
+
 ErrorOr<void> ControlBusServer::handle_metrics_snapshot(Client& client, StringView id)
 {
-    auto* runtime = m_world_manager.find_runtime(m_world_id);
+    auto* runtime = find_runtime(m_world_manager, m_runtime, m_world_id);
     if (!runtime)
         return Error::from_string_literal("World runtime is not available");
 
@@ -546,6 +615,61 @@ ErrorOr<void> ControlBusServer::handle_metrics_snapshot(Client& client, StringVi
     result.set("world_state"sv, world_state_name(runtime->world_state()));
     result.set("runtime_state"sv, runtime_state_name(runtime->state()));
     result.set("fault_reason"sv, runtime->fault_reason());
+    send_response(client, id, true, result);
+    return {};
+}
+
+ErrorOr<void> ControlBusServer::handle_world_shutdown(Client& client, StringView id)
+{
+    JsonObject result;
+    result.set("accepted"sv, true);
+    send_response(client, id, true, result);
+    if (m_shutdown_callback)
+        m_shutdown_callback();
+    return {};
+}
+
+ErrorOr<void> ControlBusServer::handle_resources_list(Client& client, StringView id)
+{
+    auto* runtime = find_runtime(m_world_manager, m_runtime, m_world_id);
+    if (!runtime)
+        return Error::from_string_literal("World runtime is not available");
+
+    auto* host = dynamic_cast<SubprocessWorldRuntimeHost*>(runtime->runtime_host());
+    if (!host) {
+        JsonObject result;
+        result.set("meshes"sv, JsonObject());
+        result.set("materials"sv, JsonObject());
+        result.set("panels"sv, JsonArray());
+        send_response(client, id, true, result);
+        return {};
+    }
+
+    auto registrations = host->get_all_registrations();
+
+    JsonObject meshes;
+    for (auto const& it : registrations.meshes)
+        meshes.set(it.key, it.value);
+
+    JsonObject materials;
+    for (auto const& it : registrations.materials)
+        materials.set(it.key, it.value);
+
+    JsonArray panels;
+    for (auto const& panel : registrations.panels) {
+        JsonObject entry;
+        entry.set("handle"sv, panel.handle);
+        entry.set("entity_id"sv, panel.entity_id);
+        entry.set("url"sv, MUST(String::from_byte_string(panel.url)));
+        entry.set("width"sv, panel.width);
+        entry.set("height"sv, panel.height);
+        (void)panels.append(move(entry));
+    }
+
+    JsonObject result;
+    result.set("meshes"sv, move(meshes));
+    result.set("materials"sv, move(materials));
+    result.set("panels"sv, move(panels));
     send_response(client, id, true, result);
     return {};
 }
@@ -584,8 +708,10 @@ void ControlBusServer::send_response(Client& client, StringView id, bool ok, Jso
         response.set("error"sv, error);
 
     auto text = response.serialized();
-    if (auto result_or_error = send_ws_text_frame(*client.socket, text); result_or_error.is_error())
+    if (auto result_or_error = send_ws_text_frame(*client.socket, text); result_or_error.is_error()) {
         warnln("ControlBus: send error: {}", result_or_error.error());
+        m_clients.remove(client);
+    }
 }
 
 void ControlBusServer::send_event(StringView event, JsonValue const& data)
@@ -595,6 +721,7 @@ void ControlBusServer::send_event(StringView event, JsonValue const& data)
     message.set("event"sv, event);
     message.set("data"sv, data);
     auto text = message.serialized();
+    Vector<NonnullRefPtr<Client>> dead_clients;
 
     for (auto& client : m_clients) {
         if (!client->handshaked)
@@ -610,9 +737,14 @@ void ControlBusServer::send_event(StringView event, JsonValue const& data)
             if (!matched)
                 continue;
         }
-        if (auto result = send_ws_text_frame(*client->socket, text); result.is_error())
+        if (auto result = send_ws_text_frame(*client->socket, text); result.is_error()) {
             warnln("ControlBus: event send error: {}", result.error());
+            dead_clients.append(client);
+        }
     }
+
+    for (auto& client : dead_clients)
+        m_clients.remove(client);
 }
 
 }

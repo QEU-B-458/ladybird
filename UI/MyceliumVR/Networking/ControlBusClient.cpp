@@ -160,14 +160,17 @@ void ControlBusClient::poll()
     if (!m_connected || !m_socket)
         return;
 
-    auto can_read_or_error = m_socket->can_read_without_blocking();
-    if (can_read_or_error.is_error() || !can_read_or_error.value())
-        return;
+    while (m_connected && m_socket) {
+        auto can_read_or_error = m_socket->can_read_without_blocking();
+        if (can_read_or_error.is_error() || !can_read_or_error.value())
+            break;
 
-    auto result = on_data();
-    if (result.is_error()) {
-        warnln("ControlBusClient: Error on data: {}", result.error());
-        disconnect();
+        auto result = on_data();
+        if (result.is_error()) {
+            warnln("ControlBusClient: Error on data: {}", result.error());
+            disconnect();
+            break;
+        }
     }
 }
 
@@ -176,8 +179,15 @@ ErrorOr<void> ControlBusClient::on_data()
     if (!m_handshaked)
         return handle_handshake_response();
 
-    auto frame = TRY(read_ws_frame(*m_socket));
+    auto frame_or_error = read_ws_frame(*m_socket);
+    if (frame_or_error.is_error()) {
+        warnln("ControlBusClient: Failed to read WebSocket frame: {}", frame_or_error.error());
+        return frame_or_error.release_error();
+    }
+    auto frame = frame_or_error.release_value();
+
     if (frame.opcode == 0x8) {
+        outln("ControlBusClient: Received close frame");
         disconnect();
         return {};
     }
@@ -185,8 +195,10 @@ ErrorOr<void> ControlBusClient::on_data()
     if (frame.opcode == 0x1) {
         auto json_text = StringView { frame.payload };
         auto json_or_error = JsonValue::from_string(json_text);
-        if (json_or_error.is_error())
+        if (json_or_error.is_error()) {
+            warnln("ControlBusClient: Received invalid JSON ({} bytes): {}", json_text.length(), json_or_error.error());
             return Error::from_string_literal("ControlBusClient: Received invalid JSON");
+        }
 
         auto json = json_or_error.release_value();
         if (!json.is_object())

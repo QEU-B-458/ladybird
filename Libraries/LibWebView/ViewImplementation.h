@@ -71,6 +71,8 @@ public:
     void create_new_process_for_cross_site_navigation(URL::URL const&);
 
     void server_did_paint(Badge<WebContentClient>, i32 bitmap_id, Gfx::IntSize size);
+    void set_automatic_ready_to_paint_acks_enabled(bool enabled) { m_automatic_ready_to_paint_acks_enabled = enabled; }
+    void acknowledge_ready_to_paint();
 
     void set_window_position(Gfx::IntPoint);
     void set_window_size(Gfx::IntSize);
@@ -412,6 +414,8 @@ protected:
     u64 m_next_navigation_listener_id { 1 };
 
     bool m_devtools_connected { false };
+    bool m_automatic_ready_to_paint_acks_enabled { true };
+    u32 m_pending_ready_to_paint_acks { 0 };
 };
 
 }
